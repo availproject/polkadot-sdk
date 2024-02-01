@@ -636,7 +636,7 @@ where
 		}
 
 		let is_best = self.client.info().best_hash == hash;
-		log::debug!(target: LOG_TARGET, "Reannouncing block {hash:?} is_best: {is_best}");
+		log::debug!(target: LOG_TARGET, "Reannouncing block {hash:?} is_best: {is_best} num peers {}", self.peers.len());
 
 		let data = data
 			.or_else(|| self.block_announce_data_cache.get(&hash).cloned())

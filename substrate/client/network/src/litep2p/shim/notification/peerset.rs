@@ -446,6 +446,7 @@ impl Peerset {
 				*state = PeerState::Connected { direction: *substream_direction };
 				self.connected_peers.fetch_add(1usize, Ordering::Relaxed);
 
+				// TODO: fix
 				return OpenResult::Accept { direction: direction.into() }
 			},
 			// litep2p doesn't support the ability to cancel an opening substream so if the
@@ -775,10 +776,7 @@ impl Peerset {
 		&'a mut self,
 		peers: impl Iterator<Item = &'a PeerId>,
 	) -> (usize, usize) {
-		let mut num_in = 0;
-		let mut num_out = 0;
-
-		for peer in peers {
+		peers.fold((0, 0), |(mut inbound, mut outbound), peer| {
 			match self.peers.get_mut(peer) {
 				Some(PeerState::Disconnected | PeerState::Backoff) => {},
 				Some(
@@ -789,11 +787,11 @@ impl Peerset {
 				) => {
 					*direction = match direction {
 						Direction::Inbound(Reserved::No) => {
-							num_in += 1;
+							inbound += 1;
 							Direction::Inbound(Reserved::Yes)
 						},
 						Direction::Outbound(Reserved::No) => {
-							num_out += 1;
+							outbound += 1;
 							Direction::Outbound(Reserved::Yes)
 						},
 						ref direction => **direction,
@@ -803,9 +801,9 @@ impl Peerset {
 					self.peers.insert(*peer, PeerState::Disconnected);
 				},
 			}
-		}
 
-		(num_in, num_out)
+			(inbound, outbound)
+		})
 	}
 
 	/// Get the number of inbound peers.
@@ -945,12 +943,18 @@ impl Stream for Peerset {
 					self.num_out -= out_peers;
 					self.num_in -= in_peers;
 
-					// collect reserved peers that are not in the new set and then overwrite
-					// the old reserved peers with the new set
+					// add all unknown peers to `self.peers`
+					peers.iter().for_each(|peer| {
+						if !self.peers.contains_key(peer) {
+							self.peers.insert(*peer, PeerState::Disconnected);
+						}
+					});
+
+					// collect all peers who are not in the new reserved set
 					let peers_to_remove = self
-						.reserved_peers
+						.peers
 						.iter()
-						.filter_map(|peer| (!peers.contains(peer)).then_some(*peer))
+						.filter_map(|(peer, _)| (!peers.contains(peer)).then_some(*peer))
 						.collect::<HashSet<_>>();
 
 					self.reserved_peers = peers;
