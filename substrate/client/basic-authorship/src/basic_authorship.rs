@@ -499,6 +499,12 @@ where
 						break EndProposingReason::HitBlockWeightLimit
 					}
 				},
+				Err(ApplyExtrinsicFailed(Validity(e))) if e.eq(&InvalidTransaction::Custom(139u8)) => {
+					pending_iterator.report_invalid(&pending_tx);
+					if (self.now)() >= soft_deadline {
+						break EndProposingReason::HitBlockWeightLimit
+					}
+				},
 				Err(e) => {
 					pending_iterator.report_invalid(&pending_tx);
 					debug!(
