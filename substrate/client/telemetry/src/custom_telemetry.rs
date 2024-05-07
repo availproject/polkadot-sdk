@@ -9,7 +9,7 @@ use wasm_timer::{SystemTime, UNIX_EPOCH};
 use crate::{telemetry, TelemetryHandle, SUBSTRATE_INFO};
 
 /// Maximum amount of intervals that we will keep in our storage.
-pub const MAXIMUM_INTERVALS_LENGTH: usize = 50;
+pub const MAXIMUM_INTERVALS_LENGTH: usize = 5;
 /// Maximum amount of block requests info that we will keep in our storage.
 pub const MAXIMUM_BLOCK_REQUESTS_LENGTH: usize = 15;
 
