@@ -96,36 +96,40 @@ impl BlockMetrics {
 		timestamp: u64,
 		is_start: bool,
 	) {
-		let Ok(mut lock) = BLOCK_METRICS.lock() else {
-			return;
-		};
 
-		if is_start {
-			if lock.partial_intervals.len() >= MAXIMUM_INTERVALS_LENGTH {
-				lock.partial_intervals.remove(0);
-			}
-
-			let value = IntervalWithBlockInformation {
-				kind,
-				block_number,
-				block_hash,
-				start_timestamp: timestamp,
-				end_timestamp: 0,
+		let mut entry = {
+			let Ok(mut lock) = BLOCK_METRICS.lock() else {
+				return;
 			};
-
-			lock.partial_intervals.push(value);
-			return;
-		}
-
-		let existing_entry_pos = lock.partial_intervals.iter_mut().position(|v| {
-			v.block_hash == block_hash && v.block_number == block_number && v.kind == kind
-		});
-
-		let Some(pos) = existing_entry_pos else {
-			return;
+	
+			if is_start {
+				if lock.partial_intervals.len() >= MAXIMUM_INTERVALS_LENGTH {
+					lock.partial_intervals.remove(0);
+				}
+	
+				let value = IntervalWithBlockInformation {
+					kind,
+					block_number,
+					block_hash,
+					start_timestamp: timestamp,
+					end_timestamp: 0,
+				};
+	
+				lock.partial_intervals.push(value);
+				return;
+			}
+	
+			let existing_entry_pos = lock.partial_intervals.iter_mut().position(|v| {
+				v.block_hash == block_hash && v.block_number == block_number && v.kind == kind
+			});
+	
+			let Some(pos) = existing_entry_pos else {
+				return;
+			};
+	
+			lock.partial_intervals.remove(pos)
 		};
 
-		let mut entry = lock.partial_intervals.remove(pos);
 		entry.end_timestamp = timestamp;
 
 		Self::observe_interval(entry);
