@@ -87,7 +87,7 @@ impl BlockMetrics {
 			return;
 		};
 
-		if lock.intervals.len() >= lock.max_interval_buffer_size {
+		if lock.intervals.len() >= lock.max_interval_buffer_size && lock.intervals.len() > 0 {
 			lock.intervals.remove(0);
 		}
 
@@ -108,7 +108,9 @@ impl BlockMetrics {
 			};
 
 			if is_start {
-				if lock.partial_intervals.len() >= lock.max_interval_buffer_size {
+				if lock.partial_intervals.len() >= lock.max_interval_buffer_size
+					&& lock.partial_intervals.len() > 0
+				{
 					lock.partial_intervals.remove(0);
 				}
 
@@ -160,6 +162,9 @@ impl BlockMetrics {
 		};
 
 		let metrics = std::mem::take(&mut *lock);
+		lock.max_interval_buffer_size = metrics.max_interval_buffer_size;
+		lock.max_block_request_buffer_size = metrics.max_block_request_buffer_size;
+
 		Some(metrics)
 	}
 
