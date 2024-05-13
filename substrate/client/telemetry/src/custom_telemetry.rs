@@ -6,12 +6,8 @@ use std::{
 use serde::Serialize;
 use wasm_timer::{SystemTime, UNIX_EPOCH};
 
+use crate::custom_telemetry::external::BlockIntervalFromNode;
 use crate::{telemetry, TelemetryHandle, SUBSTRATE_INFO};
-
-/// Maximum amount of intervals that we will keep in our storage.
-pub const MAXIMUM_INTERVALS_LENGTH: usize = 50;
-/// Maximum amount of block requests info that we will keep in our storage.
-pub const MAXIMUM_BLOCK_REQUESTS_LENGTH: usize = 15;
 
 ///
 #[repr(u8)]
@@ -63,12 +59,22 @@ pub struct BlockMetrics {
 	partial_intervals: Vec<IntervalWithBlockInformation>,
 	///
 	block_requests: Vec<BlockRequestsDetail>,
+	///
+	max_interval_buffer_size: usize,
+	///
+	max_block_request_buffer_size: usize,
 }
 
 impl BlockMetrics {
 	///
 	pub const fn new() -> Self {
-		Self { intervals: Vec::new(), partial_intervals: Vec::new(), block_requests: Vec::new() }
+		Self {
+			intervals: Vec::new(),
+			partial_intervals: Vec::new(),
+			block_requests: Vec::new(),
+			max_interval_buffer_size: 0,
+			max_block_request_buffer_size: 0,
+		}
 	}
 }
 
@@ -81,7 +87,7 @@ impl BlockMetrics {
 			return;
 		};
 
-		if lock.intervals.len() >= MAXIMUM_INTERVALS_LENGTH {
+		if lock.intervals.len() >= lock.max_interval_buffer_size {
 			lock.intervals.remove(0);
 		}
 
@@ -100,12 +106,12 @@ impl BlockMetrics {
 			let Ok(mut lock) = BLOCK_METRICS.lock() else {
 				return;
 			};
-	
+
 			if is_start {
-				if lock.partial_intervals.len() >= MAXIMUM_INTERVALS_LENGTH {
+				if lock.partial_intervals.len() >= lock.max_interval_buffer_size {
 					lock.partial_intervals.remove(0);
 				}
-	
+
 				let value = IntervalWithBlockInformation {
 					kind,
 					block_number,
@@ -113,19 +119,19 @@ impl BlockMetrics {
 					start_timestamp: timestamp,
 					end_timestamp: 0,
 				};
-	
+
 				lock.partial_intervals.push(value);
 				return;
 			}
-	
+
 			let existing_entry_pos = lock.partial_intervals.iter_mut().position(|v| {
 				v.block_hash == block_hash && v.block_number == block_number && v.kind == kind
 			});
-	
+
 			let Some(pos) = existing_entry_pos else {
 				return;
 			};
-	
+
 			lock.partial_intervals.remove(pos)
 		};
 
@@ -140,7 +146,7 @@ impl BlockMetrics {
 			return;
 		};
 
-		if lock.block_requests.len() >= MAXIMUM_BLOCK_REQUESTS_LENGTH {
+		if lock.block_requests.len() >= lock.max_block_request_buffer_size {
 			lock.block_requests.remove(0);
 		}
 
@@ -169,7 +175,7 @@ impl BlockMetrics {
 }
 
 /// This will be send to the telemetry
-mod external {
+pub mod external {
 	use super::*;
 
 	#[derive(Debug, Serialize, Clone)]
@@ -182,6 +188,7 @@ mod external {
 		pub end_timestamp: u64,
 	}
 
+	///
 	#[derive(Debug, Default, Serialize, Clone)]
 	pub struct BlockIntervalFromNode {
 		///
@@ -237,31 +244,64 @@ pub struct CustomTelemetryWorker {
 	pub handle: Option<TelemetryHandle>,
 	///
 	pub sampling_interval_ms: u128,
+	///
+	pub max_interval_buffer_size: usize,
+	///
+	pub max_block_request_buffer_size: usize,
 }
 
 impl CustomTelemetryWorker {
 	///
-	pub async fn run(self) {
+	pub async fn run(
+		self,
+		filter_intervals: Option<fn(Vec<BlockIntervalFromNode>) -> Vec<BlockIntervalFromNode>>,
+		filter_block_requests: Option<fn(Vec<BlockRequestsDetail>) -> Vec<BlockRequestsDetail>>,
+	) {
 		const SLEEP_DURATION: Duration = Duration::from_millis(250);
+
+		if let Ok(mut lock) = BLOCK_METRICS.lock() {
+			lock.max_interval_buffer_size = self.max_interval_buffer_size;
+			lock.max_block_request_buffer_size = self.max_block_request_buffer_size;
+		}
 
 		let mut start = std::time::Instant::now();
 		loop {
 			if start.elapsed().as_millis() >= self.sampling_interval_ms {
-				let metrics = BlockMetrics::take_metrics().unwrap_or_default();
-				let block_intervals = external::prepare_data(metrics.intervals);
-
-				telemetry!(
-					self.handle;
-					SUBSTRATE_INFO;
-					"block.metrics";
-					"block_intervals" => block_intervals,
-					"block_requests" => metrics.block_requests,
-				);
-
+				self.send_telemetry(filter_intervals, filter_block_requests);
 				start = std::time::Instant::now();
 			}
 
 			tokio::time::sleep(SLEEP_DURATION).await;
+		}
+	}
+
+	pub async fn send_telemetry(
+		&self,
+		filter_intervals: Option<fn(Vec<BlockIntervalFromNode>) -> Vec<BlockIntervalFromNode>>,
+		filter_block_requests: Option<fn(Vec<BlockRequestsDetail>) -> Vec<BlockRequestsDetail>>,
+	) {
+		let metrics = BlockMetrics::take_metrics().unwrap_or_default();
+
+		let block_intervals = external::prepare_data(metrics.intervals);
+		let block_intervals = match filter_intervals {
+			Some(f) => f(block_intervals),
+			_ => block_intervals,
+		};
+
+		let block_requests = metrics.block_requests;
+		let block_requests = match filter_block_requests {
+			Some(f) => f(block_requests),
+			_ => block_requests,
+		};
+
+		if block_intervals.len() > 0 || block_requests.len() > 0 {
+			telemetry!(
+				self.handle;
+				SUBSTRATE_INFO;
+				"block.metrics";
+				"block_intervals" => block_intervals,
+				"block_requests" => block_requests,
+			);
 		}
 	}
 }
