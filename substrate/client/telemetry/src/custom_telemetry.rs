@@ -267,7 +267,7 @@ impl CustomTelemetryWorker {
 		let mut start = std::time::Instant::now();
 		loop {
 			if start.elapsed().as_millis() >= self.sampling_interval_ms {
-				self.send_telemetry(filter_intervals, filter_block_requests);
+				self.send_telemetry(filter_intervals, filter_block_requests).await;
 				start = std::time::Instant::now();
 			}
 
