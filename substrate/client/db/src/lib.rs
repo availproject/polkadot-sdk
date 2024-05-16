@@ -39,7 +39,7 @@ mod record_stats_state;
 mod stats;
 #[cfg(any(feature = "rocksdb", test))]
 mod upgrade;
-mod utils;
+pub mod utils;
 
 use linked_hash_map::LinkedHashMap;
 use log::{debug, trace, warn};
@@ -118,7 +118,7 @@ pub type DbHash = sp_core::H256;
 
 /// An extrinsic entry in the database.
 #[derive(Debug, Encode, Decode)]
-enum DbExtrinsic<B: BlockT> {
+pub enum DbExtrinsic<B: BlockT> {
 	/// Extrinsic that contains indexed data.
 	Indexed {
 		/// Hash of the indexed part.
@@ -476,7 +476,7 @@ fn cache_header<Hash: std::cmp::Eq + std::hash::Hash, Header>(
 
 /// Block database
 pub struct BlockchainDb<Block: BlockT> {
-	db: Arc<dyn Database<DbHash>>,
+	pub db: Arc<dyn Database<DbHash>>,
 	meta: Arc<RwLock<Meta<NumberFor<Block>, Block::Hash>>>,
 	leaves: RwLock<LeafSet<Block::Hash, NumberFor<Block>>>,
 	header_metadata_cache: Arc<HeaderMetadataCache<Block>>,
