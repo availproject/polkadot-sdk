@@ -132,6 +132,19 @@ pub trait PaysFee<T> {
 	fn pays_fee(&self, _target: T) -> Pays;
 }
 
+/// Indicates if dispatch function should customize how the fees are getting calculated.
+pub trait CustomDispatchFee<T> {
+	fn custom_dispatch_fee(&self, _target: T) -> DispatchFeeModifier;
+}
+
+/// Defines how the fees are getting modified.
+#[derive(Clone, Copy, Eq, PartialEq, Default, RuntimeDebug, Encode, Decode, TypeInfo, MaxEncodedLen)]
+pub struct DispatchFeeModifier {
+	pub weight_maximum_fee: Option<u128>,
+	pub weight_fee_divider: Option<u32>,
+	pub weight_fee_multiplier: Option<u32>
+}
+
 /// Explicit enum to denote if a transaction pays fee or not.
 #[derive(Clone, Copy, Eq, PartialEq, RuntimeDebug, Encode, Decode, TypeInfo)]
 pub enum Pays {
@@ -242,6 +255,8 @@ pub struct DispatchInfo {
 	pub class: DispatchClass,
 	/// Does this transaction pay fees.
 	pub pays_fee: Pays,
+	/// Does this transaction have custom fees.
+	pub fee_modifier: DispatchFeeModifier,
 }
 
 /// A `Dispatchable` function (aka transaction) that can carry some static information along with
@@ -400,6 +415,7 @@ impl<Call: Encode + GetDispatchInfo, Extra: Encode> GetDispatchInfo
 			weight: Weight::from_parts(self.encode().len() as _, 0),
 			pays_fee: Pays::Yes,
 			class: self.call.get_dispatch_info().class,
+			fee_modifier: DispatchFeeModifier::default(),
 		}
 	}
 }
@@ -518,13 +534,31 @@ impl<T> WeighData<T> for (Weight, DispatchClass, Pays) {
 	}
 }
 
+impl<T> WeighData<T> for (Weight, DispatchClass, DispatchFeeModifier) {
+	fn weigh_data(&self, args: T) -> Weight {
+		return self.0.weigh_data(args)
+	}
+}
+
 impl<T> ClassifyDispatch<T> for (Weight, DispatchClass) {
 	fn classify_dispatch(&self, _: T) -> DispatchClass {
 		self.1
 	}
 }
 
+impl<T> ClassifyDispatch<T> for (Weight, DispatchClass, DispatchFeeModifier) {
+	fn classify_dispatch(&self, _: T) -> DispatchClass {
+		self.1
+	}
+}
+
 impl<T> PaysFee<T> for (Weight, DispatchClass) {
+	fn pays_fee(&self, _: T) -> Pays {
+		Pays::Yes
+	}
+}
+
+impl<T> PaysFee<T> for (Weight, DispatchClass, DispatchFeeModifier) {
 	fn pays_fee(&self, _: T) -> Pays {
 		Pays::Yes
 	}
@@ -576,6 +610,30 @@ impl<T> PaysFee<T> for Weight {
 impl<T> ClassifyDispatch<T> for (Weight, DispatchClass, Pays) {
 	fn classify_dispatch(&self, _: T) -> DispatchClass {
 		self.1
+	}
+}
+
+impl<T> CustomDispatchFee<T> for Weight {
+	fn custom_dispatch_fee(&self, _: T) -> DispatchFeeModifier {
+		DispatchFeeModifier::default()
+	}
+}
+
+impl<T> CustomDispatchFee<T> for (Weight, DispatchClass) {
+	fn custom_dispatch_fee(&self, _: T) -> DispatchFeeModifier {
+		DispatchFeeModifier::default()
+	}
+}
+
+impl<T> CustomDispatchFee<T> for (Weight, DispatchFeeModifier) {
+	fn custom_dispatch_fee(&self, _: T) -> DispatchFeeModifier {
+		self.1
+	}
+}
+
+impl<T> CustomDispatchFee<T> for (Weight, DispatchClass, DispatchFeeModifier) {
+	fn custom_dispatch_fee(&self, _: T) -> DispatchFeeModifier {
+		self.2
 	}
 }
 
