@@ -2020,12 +2020,12 @@ impl<T: Config> Pallet<T> {
 		Self::validate_authorized_upgrade(&code[..])?;
 		T::OnSetCode::set_code(code)?;
 		AuthorizedUpgrade::<T>::kill();
-		let post = PostDispatchInfo {
+		let post = PostDispatchInfo::new(
 			// consume the rest of the block to prevent further transactions
-			actual_weight: Some(T::BlockWeights::get().max_block),
+			Some(T::BlockWeights::get().max_block),
 			// no fee for valid upgrade
-			pays_fee: Pays::No,
-		};
+			Pays::No,
+		);
 		Ok(post)
 	}
 

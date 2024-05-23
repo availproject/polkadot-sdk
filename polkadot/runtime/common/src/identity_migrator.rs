@@ -121,12 +121,12 @@ pub mod pallet {
 			let (registrars, bytes, subs) = pallet_identity::Pallet::<T>::reap_identity(&who)?;
 			T::ReapIdentityHandler::on_reap_identity(&who, bytes, subs)?;
 			Self::deposit_event(Event::IdentityReaped { who });
-			let post = PostDispatchInfo {
-				actual_weight: Some(<T as pallet::Config>::WeightInfo::reap_identity(
+			let post = PostDispatchInfo::new(
+				Some(<T as pallet::Config>::WeightInfo::reap_identity(
 					registrars, subs,
 				)),
-				pays_fee: Pays::No,
-			};
+				Pays::No,
+			);
 			Ok(post)
 		}
 

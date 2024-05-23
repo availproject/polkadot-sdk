@@ -359,10 +359,15 @@ pub fn expand_call(def: &mut Def) -> proc_macro2::TokenStream {
 								dyn #frame_support::dispatch::PaysFee<( #( & #args_type, )* )>
 							>::pays_fee(&__pallet_base_weight, ( #( #args_name, )* ));
 
+							let __pallet_is_special= <
+								dyn #frame_support::dispatch::IsSpecial<( #( & #args_type, )* )>
+							>::is_special(&__pallet_base_weight, ( #( #args_name, )* ));
+
 							#frame_support::dispatch::DispatchInfo {
 								weight: __pallet_weight,
 								class: __pallet_class,
 								pays_fee: __pallet_pays_fee,
+								is_special: __pallet_is_special,
 							}
 						},
 					)*

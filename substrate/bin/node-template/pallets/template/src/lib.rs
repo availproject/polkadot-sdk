@@ -95,6 +95,15 @@ pub mod pallet {
 	#[pallet::getter(fn something)]
 	pub type Something<T> = StorageValue<_, u32>;
 
+		/// A storage item for this pallet.
+	///
+	/// In this template, we are declaring a storage item called `Something` that stores a single
+	/// `u32` value. Learn more about runtime storage here: <https://docs.substrate.io/build/runtime-storage/>
+	/// The [`getter`] macro generates a function to conveniently retrieve the value from storage.
+	#[pallet::storage]
+	pub type SomethingA<T> = StorageValue<_, bool, ValueQuery>;
+
+
 	/// Events that functions in this pallet can emit.
 	///
 	/// Events are a simple means of indicating to the outside world (such as dApps, chain explorers
@@ -153,16 +162,12 @@ pub mod pallet {
 		/// It checks that the _origin_ for this call is _Signed_ and returns a dispatch
 		/// error if it isn't. Learn more about origins here: <https://docs.substrate.io/build/origins/>
 		#[pallet::call_index(0)]
-		#[pallet::weight(T::WeightInfo::do_something())]
-		pub fn do_something(origin: OriginFor<T>, something: u32) -> DispatchResult {
-			// Check that the extrinsic was signed and get the signer.
-			let who = ensure_signed(origin)?;
-
+		#[pallet::weight((T::WeightInfo::do_something(), {
+			SomethingA::<T>::get()
+		}))]
+		pub fn do_something(origin: OriginFor<T>, something: bool) -> DispatchResult {
 			// Update storage.
-			Something::<T>::put(something);
-
-			// Emit an event.
-			Self::deposit_event(Event::SomethingStored { something, who });
+			SomethingA::<T>::put(something);
 
 			// Return a successful `DispatchResult`
 			Ok(())
@@ -199,6 +204,22 @@ pub mod pallet {
 					Ok(())
 				},
 			}
+		}
+
+		#[pallet::call_index(2)]
+		#[pallet::weight(T::WeightInfo::do_something())]
+		pub fn do_something2(origin: OriginFor<T>, something: u32) -> DispatchResult {
+			// Check that the extrinsic was signed and get the signer.
+			let who = ensure_signed(origin)?;
+
+			// Update storage.
+			Something::<T>::put(something);
+
+			// Emit an event.
+			Self::deposit_event(Event::SomethingStored { something, who });
+
+			// Return a successful `DispatchResult`
+			Ok(())
 		}
 	}
 }

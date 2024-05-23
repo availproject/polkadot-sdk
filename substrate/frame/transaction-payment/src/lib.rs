@@ -586,7 +586,7 @@ impl<T: Config> Pallet<T> {
 	where
 		T::RuntimeCall: Dispatchable<Info = DispatchInfo>,
 	{
-		Self::compute_fee_raw(len, info.weight, tip, info.pays_fee, info.class)
+		Self::compute_fee_raw(len, info.weight, tip, info.pays_fee, info.class, info.is_special)
 	}
 
 	/// Compute the actual post dispatch fee for a particular transaction.
@@ -621,6 +621,7 @@ impl<T: Config> Pallet<T> {
 			tip,
 			post_info.pays_fee(info),
 			info.class,
+			post_info.is_special,
 		)
 	}
 
@@ -630,18 +631,25 @@ impl<T: Config> Pallet<T> {
 		tip: BalanceOf<T>,
 		pays_fee: Pays,
 		class: DispatchClass,
+		is_special: bool,
 	) -> FeeDetails<BalanceOf<T>> {
 		if pays_fee == Pays::Yes {
 			// the adjustable part of the fee.
 			let unadjusted_weight_fee = Self::weight_to_fee(weight);
 			let multiplier = Self::next_fee_multiplier();
 			// final adjusted weight fee.
-			let adjusted_weight_fee = multiplier.saturating_mul_int(unadjusted_weight_fee);
+			let mut adjusted_weight_fee = multiplier.saturating_mul_int(unadjusted_weight_fee);
 
 			// length fee. this is adjusted via `LengthToFee`.
-			let len_fee = Self::length_to_fee(len);
+			let mut len_fee = Self::length_to_fee(len);
 
-			let base_fee = Self::weight_to_fee(T::BlockWeights::get().get(class).base_extrinsic);
+			let mut base_fee = Self::weight_to_fee(T::BlockWeights::get().get(class).base_extrinsic);
+			if is_special{
+				base_fee = 0u32.into();
+				len_fee = 0u32.into();
+				adjusted_weight_fee = 0u32.into();
+			}
+
 			FeeDetails {
 				inclusion_fee: Some(InclusionFee { base_fee, len_fee, adjusted_weight_fee }),
 				tip,
