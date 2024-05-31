@@ -53,6 +53,7 @@ use scale_info::TypeInfo;
 use frame_support::{
 	dispatch::{
 		DispatchClass, DispatchInfo, DispatchResult, GetDispatchInfo, Pays, PostDispatchInfo,
+		DispatchFeeModifier,
 	},
 	traits::{Defensive, EstimateCallFee, Get},
 	weights::{Weight, WeightToFee},
@@ -71,6 +72,7 @@ use sp_runtime::{
 };
 use sp_std::prelude::*;
 pub use types::{FeeDetails, InclusionFee, RuntimeDispatchInfo};
+use sp_runtime::traits::CheckedDiv;
 
 #[cfg(test)]
 mod mock;
@@ -586,7 +588,7 @@ impl<T: Config> Pallet<T> {
 	where
 		T::RuntimeCall: Dispatchable<Info = DispatchInfo>,
 	{
-		Self::compute_fee_raw(len, info.weight, tip, info.pays_fee, info.class)
+		Self::compute_fee_raw(len, info.weight, tip, info.pays_fee, info.class, info.fee_modifier)
 	}
 
 	/// Compute the actual post dispatch fee for a particular transaction.
@@ -621,6 +623,7 @@ impl<T: Config> Pallet<T> {
 			tip,
 			post_info.pays_fee(info),
 			info.class,
+			info.fee_modifier,
 		)
 	}
 
@@ -630,18 +633,34 @@ impl<T: Config> Pallet<T> {
 		tip: BalanceOf<T>,
 		pays_fee: Pays,
 		class: DispatchClass,
+		fee_modifier: DispatchFeeModifier,
 	) -> FeeDetails<BalanceOf<T>> {
 		if pays_fee == Pays::Yes {
 			// the adjustable part of the fee.
 			let unadjusted_weight_fee = Self::weight_to_fee(weight);
 			let multiplier = Self::next_fee_multiplier();
 			// final adjusted weight fee.
-			let adjusted_weight_fee = multiplier.saturating_mul_int(unadjusted_weight_fee);
+			let mut adjusted_weight_fee = multiplier.saturating_mul_int(unadjusted_weight_fee);
 
 			// length fee. this is adjusted via `LengthToFee`.
 			let len_fee = Self::length_to_fee(len);
 
 			let base_fee = Self::weight_to_fee(T::BlockWeights::get().get(class).base_extrinsic);
+
+			// Custom code
+			if let Some(fee_multiplier) = fee_modifier.weight_fee_multiplier {
+				adjusted_weight_fee = adjusted_weight_fee.saturating_mul(fee_multiplier.into());
+			}
+
+			if let Some(fee_divider) = fee_modifier.weight_fee_divider {
+				adjusted_weight_fee = adjusted_weight_fee.checked_div(&fee_divider.into()).unwrap_or_else(|| adjusted_weight_fee);
+			}
+
+			if let Some(maximum_fee) = fee_modifier.weight_maximum_fee {
+				let maximum_fee = maximum_fee.saturated_into();
+				adjusted_weight_fee = adjusted_weight_fee.min(maximum_fee);
+			}
+
 			FeeDetails {
 				inclusion_fee: Some(InclusionFee { base_fee, len_fee, adjusted_weight_fee }),
 				tip,
