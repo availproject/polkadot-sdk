@@ -797,7 +797,7 @@ where
 		// To prevent that, the tip is adjusted but it also mean that a tip less than 0.000000000001 won't be accounted for since the division will return 0.
 		let adjusted_tip = match tip.checked_div(1_000_000) {
 			Some(x) => x,
-			None => 0,
+			None => Zero::zero(),
 		};
 
 		// To distribute no-tip transactions a little bit, we increase the tip value by one.
