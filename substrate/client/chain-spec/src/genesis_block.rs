@@ -27,9 +27,11 @@ use sp_runtime::{
 	traits::{Block as BlockT, Hash as HashT, Header as HeaderT, Zero},
 	BuildStorage,
 };
-use sp_runtime::OpaqueExtrinsic;
+// use sp_runtime::OpaqueExtrinsic;
 use codec::{Encode, Decode};
-use hex_literal::hex;
+// use hex_literal::hex;
+
+const GENESIS_EXTRINSIC_KEY: &[u8] = b"extrinsics";
 
 /// Return the state version given the genesis storage and executor.
 pub fn resolve_state_version_from_wasm<E>(
@@ -67,22 +69,28 @@ where
 pub fn construct_genesis_block<Block: BlockT>(
 	state_root: Block::Hash,
 	state_version: StateVersion,
+	block_extrinsics: Vec<Block::Extrinsic>,
 ) -> Block {
-    // Genesis remark ext
-    let remark_ext = hex!("39028400d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d018eed6c7362d2979ef958ec8cbe6761e22d7526b736e20f85bb15901a8d8fbc39682bf991118abaae3ef1783f3a7420b816da1a8c29b1e60be3a950bb4f6c1086040000000000008c546869732069732067656e657369732072656d61726b207472616e73616374696f6e21");
-    // Genesis DA ext
-    let da_ext = hex!("59028400d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d0198ff827195df473a04f7465760c2bc87950e1b8962a974e772ae884022d66b354e347feb071a744c3e8f5b90bde02324f8d2453395cc26e660ee41410437a68844000000001d01ac48692c20686f70652074686973204441207478206c616e647320696e2067656e6573697320626c6f636b21");
 
-    // Add extrinsics to be included in the genesis block
-    let extrinsics = vec![
-        OpaqueExtrinsic::from_bytes(&remark_ext).expect("We know what we're doing!"),
-        OpaqueExtrinsic::from_bytes(&da_ext).expect("We know what we're doing!"),
-    ];
+	// let block_extrinsics = match genesis_storage.top.get(GENESIS_EXTRINSIC_KEY) {
+	// 	Some(v) => <Vec<Block::Extrinsic>>::decode(&mut &v[..]).unwrap_or_default(),
+	// 	None => Vec::new(),
+	// };
+    // // Genesis remark ext
+    // let remark_ext = hex!("39028400d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d018eed6c7362d2979ef958ec8cbe6761e22d7526b736e20f85bb15901a8d8fbc39682bf991118abaae3ef1783f3a7420b816da1a8c29b1e60be3a950bb4f6c1086040000000000008c546869732069732067656e657369732072656d61726b207472616e73616374696f6e21");
+    // // Genesis DA ext
+    // let da_ext = hex!("59028400d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d0198ff827195df473a04f7465760c2bc87950e1b8962a974e772ae884022d66b354e347feb071a744c3e8f5b90bde02324f8d2453395cc26e660ee41410437a68844000000001d01ac48692c20686f70652074686973204441207478206c616e647320696e2067656e6573697320626c6f636b21");
 
-    // Convert OpaqueExtrinsic to Block::Extrinsic
-    let block_extrinsics: Vec<Block::Extrinsic> = extrinsics.into_iter()
-        .map(|ext| Decode::decode(&mut &ext.encode()[..]).expect("Extrinsic conversion failed"))
-        .collect();
+    // // Add extrinsics to be included in the genesis block
+    // let extrinsics = vec![
+    //     OpaqueExtrinsic::from_bytes(&remark_ext).expect("We know what we're doing!"),
+    //     OpaqueExtrinsic::from_bytes(&da_ext).expect("We know what we're doing!"),
+    // ];
+
+    // // Convert OpaqueExtrinsic to Block::Extrinsic
+    // let block_extrinsics: Vec<Block::Extrinsic> = extrinsics.into_iter()
+    //     .map(|ext| Decode::decode(&mut &ext.encode()[..]).expect("Extrinsic conversion failed"))
+    //     .collect();
 
     // Collect encoded extrinsics
     let extrinsics_encoded: Vec<Vec<u8>> = block_extrinsics.iter().map(Encode::encode).collect();
@@ -154,10 +162,14 @@ impl<Block: BlockT, B: Backend<Block>, E: RuntimeVersionOf> BuildGenesisBlock<Bl
 		let Self { genesis_storage, commit_genesis_state, backend, executor, _phantom } = self;
 
 		let genesis_state_version = resolve_state_version_from_wasm(&genesis_storage, &executor)?;
+		let block_extrinsics = match genesis_storage.top.get(GENESIS_EXTRINSIC_KEY) {
+			Some(v) => <Vec<Block::Extrinsic>>::decode(&mut &v[..]).unwrap_or_default(),
+			None => Vec::new(),
+		};
 		let mut op = backend.begin_operation()?;
 		let state_root =
 			op.set_genesis_state(genesis_storage, commit_genesis_state, genesis_state_version)?;
-		let genesis_block = construct_genesis_block::<Block>(state_root, genesis_state_version);
+		let genesis_block = construct_genesis_block::<Block>(state_root, genesis_state_version, block_extrinsics);
 
 		Ok((genesis_block, op))
 	}
