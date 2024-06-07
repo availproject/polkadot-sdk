@@ -795,7 +795,10 @@ where
 
 		// Since Avail uses 18 decimals, tipping will most of the time overflow the maximum tip value of u64.
 		// To prevent that, the tip is adjusted but it also mean that a tip less than 0.000000000001 won't be accounted for since the division will return 0.
-		let adjusted_tip = tip.saturating_div(1_000_000);
+		let adjusted_tip = match tip.checked_div(1_000_000) {
+			Some(x) => x,
+			None => 0,
+		};
 
 		// To distribute no-tip transactions a little bit, we increase the tip value by one.
 		// This means that given two transactions without a tip, smaller one will be preferred.
