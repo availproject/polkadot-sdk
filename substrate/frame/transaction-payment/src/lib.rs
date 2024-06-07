@@ -795,7 +795,7 @@ where
 
 		// Since Avail uses 18 decimals, tipping will most of the time overflow the maximum tip value of u64.
 		// To prevent that, the tip is adjusted but it also mean that a tip less than 0.000000000001 won't be accounted for since the division will return 0.
-		let adjusted_tip = match tip.checked_div(1_000_000) {
+		let adjusted_tip = match tip.checked_div(&BalanceOf::<T>::from(1_000_000u32)) {
 			Some(x) => x,
 			None => Zero::zero(),
 		};
