@@ -793,9 +793,13 @@ where
 			.saturated_into::<BalanceOf<T>>();
 		let max_reward = |val: BalanceOf<T>| val.saturating_mul(max_tx_per_block);
 
+		// Since Avail uses 18 decimals, tipping will most of the time overflow the maximum tip value of u64.
+		// To prevent that, the tip is adjusted but it also mean that a tip less than 0.000000000001 won't be accounted for since the division will return 0.
+		let adjusted_tip = tip.saturating_div(1_000_000);
+
 		// To distribute no-tip transactions a little bit, we increase the tip value by one.
 		// This means that given two transactions without a tip, smaller one will be preferred.
-		let tip = tip.saturating_add(One::one());
+		let tip = adjusted_tip.saturating_add(One::one());
 		let scaled_tip = max_reward(tip);
 
 		match info.class {
