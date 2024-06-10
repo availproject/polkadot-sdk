@@ -27,6 +27,9 @@ use sp_runtime::{
 	traits::{Block as BlockT, Hash as HashT, Header as HeaderT, Zero},
 	BuildStorage,
 };
+use codec::{Encode, Decode};
+
+const GENESIS_EXTRINSIC_KEY: &[u8] = b"extrinsics";
 
 /// Return the state version given the genesis storage and executor.
 pub fn resolve_state_version_from_wasm<E>(
@@ -64,22 +67,28 @@ where
 pub fn construct_genesis_block<Block: BlockT>(
 	state_root: Block::Hash,
 	state_version: StateVersion,
+	block_extrinsics: Vec<Block::Extrinsic>,
 ) -> Block {
-	let extrinsics_root = <<<Block as BlockT>::Header as HeaderT>::Hashing as HashT>::trie_root(
-		Vec::new(),
-		state_version,
-	);
+    // Collect encoded extrinsics
+    let extrinsics_encoded: Vec<Vec<u8>> = block_extrinsics.iter().map(Encode::encode).collect();
+    
+    // Compute the extrinsics root
+    let extrinsics_root = <<Block as BlockT>::Header as HeaderT>::Hashing::ordered_trie_root(
+        extrinsics_encoded,
+        state_version,
+    );
 
-	Block::new(
-		<<Block as BlockT>::Header as HeaderT>::new(
-			Zero::zero(),
-			extrinsics_root,
-			state_root,
-			Default::default(),
-			Default::default(),
-		),
-		Default::default(),
-	)
+    // Construct the genesis block
+    Block::new(
+        <<Block as BlockT>::Header as HeaderT>::new(
+            Zero::zero(),
+            extrinsics_root,
+            state_root,
+            Default::default(),
+            Default::default(),
+        ),
+        block_extrinsics,
+    )
 }
 
 /// Trait for building the genesis block.
@@ -130,10 +139,15 @@ impl<Block: BlockT, B: Backend<Block>, E: RuntimeVersionOf> BuildGenesisBlock<Bl
 		let Self { genesis_storage, commit_genesis_state, backend, executor, _phantom } = self;
 
 		let genesis_state_version = resolve_state_version_from_wasm(&genesis_storage, &executor)?;
+		// get the valid genesis txs from the genesis spec if any 
+		let block_extrinsics = match genesis_storage.top.get(GENESIS_EXTRINSIC_KEY) {
+			Some(v) => <Vec<Block::Extrinsic>>::decode(&mut &v[..]).unwrap_or_default(),
+			None => Vec::new(),
+		};
 		let mut op = backend.begin_operation()?;
 		let state_root =
 			op.set_genesis_state(genesis_storage, commit_genesis_state, genesis_state_version)?;
-		let genesis_block = construct_genesis_block::<Block>(state_root, genesis_state_version);
+		let genesis_block = construct_genesis_block::<Block>(state_root, genesis_state_version, block_extrinsics);
 
 		Ok((genesis_block, op))
 	}
