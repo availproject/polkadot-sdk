@@ -711,9 +711,9 @@ checksum = "f52f63c5c1316a16a4b35eaac8b76a98248961a533f061684cb2a7cb0eafb6c6"
 
 [[package]]
 name = "array-bytes"
-version = "6.1.0"
+version = "6.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9b1c5a481ec30a5abd8dfbd94ab5cf1bb4e9a66be7f1b3b322f2f1170c200fd"
+checksum = "5d5dde061bd34119e902bbb2d9b90c5692635cf59fb91d582c2b68043f1b8293"
 
 [[package]]
 name = "arrayref"
@@ -729,12 +729,6 @@ checksum = "cd9fd44efafa8690358b7408d253adf110036b88f55672a933f01d616ad9b1b9"
 dependencies = [
  "nodrop",
 ]
-
-[[package]]
-name = "arrayvec"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23b62fc65de8e4e7f52534fb52b0f3ed04746ae267519eef2a83941e8085068b"
 
 [[package]]
 name = "arrayvec"
@@ -1308,7 +1302,7 @@ dependencies = [
  "ark-std 0.4.0",
  "dleq_vrf",
  "fflonk",
- "merlin 3.0.0",
+ "merlin",
  "rand_chacha 0.3.1",
  "rand_core 0.6.4",
  "ring 0.1.0",
@@ -1370,7 +1364,7 @@ dependencies = [
 name = "binary-merkle-tree"
 version = "13.0.0"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "env_logger 0.9.3",
  "hash-db",
  "log",
@@ -1535,18 +1529,6 @@ dependencies = [
 
 [[package]]
 name = "block-buffer"
-version = "0.7.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0940dc441f31689269e10ac70eb1002a3a1d3ad1390e030043662eb7fe4688b"
-dependencies = [
- "block-padding",
- "byte-tools",
- "byteorder",
- "generic-array 0.12.4",
-]
-
-[[package]]
-name = "block-buffer"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4152116fd6e9dadb291ae18fc1ec3575ed6d84c29642d97890f4b4a3417297e4"
@@ -1561,15 +1543,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71"
 dependencies = [
  "generic-array 0.14.7",
-]
-
-[[package]]
-name = "block-padding"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa79dedbb091f449f1f39e53edf88d5dbe95f895dae6135a8d7b881fb5af73f5"
-dependencies = [
- "byte-tools",
 ]
 
 [[package]]
@@ -2856,7 +2829,7 @@ dependencies = [
  "ark-std 0.4.0",
  "fflonk",
  "getrandom_or_panic",
- "merlin 3.0.0",
+ "merlin",
  "rand_chacha 0.3.1",
 ]
 
@@ -4111,7 +4084,7 @@ dependencies = [
 name = "cumulus-relay-chain-minimal-node"
 version = "0.7.0"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "async-trait",
  "cumulus-primitives-core",
  "cumulus-relay-chain-interface",
@@ -4342,19 +4315,6 @@ dependencies = [
 
 [[package]]
 name = "curve25519-dalek"
-version = "2.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a9b85542f99a2dfa2a1b8e192662741c9859a846b296bef1c92ef9b58b5a216"
-dependencies = [
- "byteorder",
- "digest 0.8.1",
- "rand_core 0.5.1",
- "subtle 2.4.1",
- "zeroize",
-]
-
-[[package]]
-name = "curve25519-dalek"
 version = "3.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b9fdf9972b2bd6af2d913799d9ebc165ea4d2e65878e329d9c6b372c4491b61"
@@ -4368,16 +4328,15 @@ dependencies = [
 
 [[package]]
 name = "curve25519-dalek"
-version = "4.1.1"
+version = "4.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e89b8c6a2e4b1f45971ad09761aafb85514a84744b67a95e32c3cc1352d1f65c"
+checksum = "97fb8b7c4503de7d6ae7b42ab72a5a59857b4c937ec27a3d4539dba95b5ab2be"
 dependencies = [
  "cfg-if",
  "cpufeatures",
  "curve25519-dalek-derive",
  "digest 0.10.7",
  "fiat-crypto",
- "platforms",
  "rustc_version 0.4.0",
  "subtle 2.4.1",
  "zeroize",
@@ -4804,7 +4763,7 @@ version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f628eaec48bfd21b865dc2950cfa014450c01d2fa2b69a86c2fd5844ec523c0"
 dependencies = [
- "curve25519-dalek 4.1.1",
+ "curve25519-dalek 4.1.3",
  "ed25519",
  "rand_core 0.6.4",
  "serde",
@@ -4815,25 +4774,11 @@ dependencies = [
 
 [[package]]
 name = "ed25519-zebra"
-version = "3.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c24f403d068ad0b359e577a77f92392118be3f3c927538f2bb544a5ecd828c6"
-dependencies = [
- "curve25519-dalek 3.2.0",
- "hashbrown 0.12.3",
- "hex",
- "rand_core 0.6.4",
- "sha2 0.9.9",
- "zeroize",
-]
-
-[[package]]
-name = "ed25519-zebra"
 version = "4.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d9ce6874da5d4415896cd45ffbc4d1cfc0c4f9c079427bd870742c30f2f65a9"
 dependencies = [
- "curve25519-dalek 4.1.1",
+ "curve25519-dalek 4.1.3",
  "ed25519",
  "hashbrown 0.14.3",
  "hex",
@@ -5136,12 +5081,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fake-simd"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e88a8acf291dafb59c2d96e8f59828f3838bb1a70398823ade51a84de6a6deed"
-
-[[package]]
 name = "fallible-iterator"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5250,7 +5189,7 @@ dependencies = [
  "ark-poly",
  "ark-serialize 0.4.2",
  "ark-std 0.4.0",
- "merlin 3.0.0",
+ "merlin",
 ]
 
 [[package]]
@@ -5420,7 +5359,7 @@ dependencies = [
 name = "frame-benchmarking"
 version = "28.0.0"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "frame-support",
  "frame-support-procedural",
  "frame-system",
@@ -5448,7 +5387,7 @@ name = "frame-benchmarking-cli"
 version = "32.0.0"
 dependencies = [
  "Inflector",
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "chrono",
  "clap 4.4.18",
  "comfy-table",
@@ -5559,7 +5498,7 @@ dependencies = [
 name = "frame-executive"
 version = "28.0.0"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "frame-support",
  "frame-system",
  "frame-try-runtime",
@@ -5616,7 +5555,7 @@ name = "frame-support"
 version = "28.0.0"
 dependencies = [
  "aquamarine",
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "assert_matches",
  "bitflags 1.3.2",
  "docify",
@@ -7991,18 +7930,6 @@ dependencies = [
 
 [[package]]
 name = "merlin"
-version = "2.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e261cf0f8b3c42ded9f7d2bb59dea03aa52bc8a1cbc7482f9fc3fd1229d3b42"
-dependencies = [
- "byteorder",
- "keccak",
- "rand_core 0.5.1",
- "zeroize",
-]
-
-[[package]]
-name = "merlin"
 version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "58c38e2799fc0978b65dfff8023ec7843e2330bb462f19198840b34b6582397d"
@@ -8119,7 +8046,7 @@ dependencies = [
  "bitflags 1.3.2",
  "blake2 0.10.6",
  "c2-chacha",
- "curve25519-dalek 4.1.1",
+ "curve25519-dalek 4.1.3",
  "either",
  "hashlink",
  "lioness",
@@ -8502,7 +8429,7 @@ checksum = "43794a0ace135be66a25d3ae77d41b91615fb68ae937f904090203e81f755b65"
 name = "node-bench"
 version = "0.9.0-dev"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "clap 4.4.18",
  "derive_more",
  "fs_extra",
@@ -8991,7 +8918,7 @@ checksum = "c1b04fb49957986fdce4d6ee7a65027d55d4b6d2265e5848bbb507b58ccfdb6f"
 name = "pallet-alliance"
 version = "27.0.0"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "frame-benchmarking",
  "frame-support",
  "frame-system",
@@ -9295,7 +9222,7 @@ dependencies = [
 name = "pallet-beefy-mmr"
 version = "28.0.0"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "binary-merkle-tree",
  "frame-support",
  "frame-system",
@@ -9516,7 +9443,7 @@ dependencies = [
 name = "pallet-contracts"
 version = "27.0.0"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "assert_matches",
  "bitflags 1.3.2",
  "env_logger 0.9.3",
@@ -10131,7 +10058,7 @@ dependencies = [
 name = "pallet-mmr"
 version = "27.0.0"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "env_logger 0.9.3",
  "frame-benchmarking",
  "frame-support",
@@ -10605,7 +10532,7 @@ dependencies = [
 name = "pallet-sassafras"
 version = "0.3.5-dev"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "frame-benchmarking",
  "frame-support",
  "frame-system",
@@ -10951,7 +10878,7 @@ dependencies = [
 name = "pallet-transaction-storage"
 version = "27.0.0"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "frame-benchmarking",
  "frame-support",
  "frame-system",
@@ -12309,7 +12236,7 @@ dependencies = [
  "kvdb",
  "kvdb-memorydb",
  "log",
- "merlin 3.0.0",
+ "merlin",
  "parity-scale-codec",
  "parking_lot 0.12.1",
  "polkadot-node-jaeger",
@@ -12570,7 +12497,7 @@ name = "polkadot-node-core-pvf"
 version = "7.0.0"
 dependencies = [
  "always-assert",
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "assert_matches",
  "blake3",
  "cfg-if",
@@ -14657,7 +14584,7 @@ dependencies = [
  "blake2 0.10.6",
  "common",
  "fflonk",
- "merlin 3.0.0",
+ "merlin",
 ]
 
 [[package]]
@@ -15316,7 +15243,7 @@ dependencies = [
 name = "sc-chain-spec"
 version = "27.0.0"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "docify",
  "log",
  "memmap2 0.9.3",
@@ -15355,7 +15282,7 @@ dependencies = [
 name = "sc-cli"
 version = "0.36.0"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "bip39",
  "chrono",
  "clap 4.4.18",
@@ -15427,7 +15354,7 @@ dependencies = [
 name = "sc-client-db"
 version = "0.35.0"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "criterion 0.4.0",
  "hash-db",
  "kitchensink-runtime",
@@ -15594,7 +15521,7 @@ dependencies = [
 name = "sc-consensus-beefy"
 version = "13.0.0"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "async-channel",
  "async-trait",
  "fnv",
@@ -15671,7 +15598,7 @@ name = "sc-consensus-grandpa"
 version = "0.19.0"
 dependencies = [
  "ahash 0.8.7",
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "assert_matches",
  "async-trait",
  "dyn-clone",
@@ -15828,7 +15755,7 @@ dependencies = [
 name = "sc-executor"
 version = "0.32.0"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "assert_matches",
  "criterion 0.4.0",
  "env_logger 0.9.3",
@@ -15918,7 +15845,7 @@ dependencies = [
 name = "sc-keystore"
 version = "25.0.0"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "parking_lot 0.12.1",
  "serde_json",
  "sp-application-crypto",
@@ -15960,7 +15887,7 @@ dependencies = [
 name = "sc-network"
 version = "0.34.0"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "assert_matches",
  "async-channel",
  "async-trait",
@@ -16079,7 +16006,7 @@ dependencies = [
 name = "sc-network-light"
 version = "0.33.0"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "async-channel",
  "futures",
  "libp2p-identity",
@@ -16099,7 +16026,7 @@ dependencies = [
 name = "sc-network-statement"
 version = "0.16.0"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "async-channel",
  "futures",
  "libp2p",
@@ -16117,7 +16044,7 @@ dependencies = [
 name = "sc-network-sync"
 version = "0.33.0"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "async-channel",
  "async-trait",
  "fork-tree",
@@ -16188,7 +16115,7 @@ dependencies = [
 name = "sc-network-transactions"
 version = "0.33.0"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "futures",
  "libp2p",
  "log",
@@ -16206,7 +16133,7 @@ dependencies = [
 name = "sc-offchain"
 version = "29.0.0"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "bytes",
  "fnv",
  "futures",
@@ -16330,7 +16257,7 @@ dependencies = [
 name = "sc-rpc-spec-v2"
 version = "0.34.0"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "assert_matches",
  "futures",
  "futures-util",
@@ -16445,7 +16372,7 @@ dependencies = [
 name = "sc-service-test"
 version = "2.0.0"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "async-channel",
  "fdlimit",
  "futures",
@@ -16621,7 +16548,7 @@ dependencies = [
 name = "sc-transaction-pool"
 version = "28.0.0"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "assert_matches",
  "async-trait",
  "criterion 0.4.0",
@@ -16754,22 +16681,6 @@ dependencies = [
 
 [[package]]
 name = "schnorrkel"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "021b403afe70d81eea68f6ea12f6b3c9588e5d536a94c3bf80f15e7faa267862"
-dependencies = [
- "arrayref",
- "arrayvec 0.5.2",
- "curve25519-dalek 2.1.3",
- "merlin 2.0.1",
- "rand_core 0.5.1",
- "sha2 0.8.2",
- "subtle 2.4.1",
- "zeroize",
-]
-
-[[package]]
-name = "schnorrkel"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "844b7645371e6ecdf61ff246ba1958c29e802881a749ae3fb1993675d210d28d"
@@ -16777,7 +16688,7 @@ dependencies = [
  "arrayref",
  "arrayvec 0.7.4",
  "curve25519-dalek-ng",
- "merlin 3.0.0",
+ "merlin",
  "rand_core 0.6.4",
  "sha2 0.9.9",
  "subtle-ng",
@@ -16793,9 +16704,9 @@ dependencies = [
  "aead 0.5.2",
  "arrayref",
  "arrayvec 0.7.4",
- "curve25519-dalek 4.1.1",
+ "curve25519-dalek 4.1.3",
  "getrandom_or_panic",
- "merlin 3.0.0",
+ "merlin",
  "rand_core 0.6.4",
  "serde_bytes",
  "sha2 0.10.7",
@@ -17161,18 +17072,6 @@ dependencies = [
 
 [[package]]
 name = "sha2"
-version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a256f46ea78a0c0d9ff00077504903ac881a1dafdc20da66545699e7776b3e69"
-dependencies = [
- "block-buffer 0.7.3",
- "digest 0.8.1",
- "fake-simd",
- "opaque-debug 0.2.3",
-]
-
-[[package]]
-name = "sha2"
 version = "0.9.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4d58a1e1bf39749807d89cf2d98ac2dfa0ff1cb3faa38fbb64dd88ac8013d800"
@@ -17393,7 +17292,7 @@ dependencies = [
  "chacha20 0.9.1",
  "crossbeam-queue",
  "derive_more",
- "ed25519-zebra 4.0.3",
+ "ed25519-zebra",
  "either",
  "event-listener",
  "fnv",
@@ -17404,7 +17303,7 @@ dependencies = [
  "hmac 0.12.1",
  "itertools 0.11.0",
  "libsecp256k1",
- "merlin 3.0.0",
+ "merlin",
  "no-std-net",
  "nom",
  "num-bigint",
@@ -17482,7 +17381,7 @@ dependencies = [
  "aes-gcm 0.9.4",
  "blake2 0.10.6",
  "chacha20poly1305",
- "curve25519-dalek 4.1.1",
+ "curve25519-dalek 4.1.3",
  "rand_core 0.6.4",
  "ring 0.16.20",
  "rustc_version 0.4.0",
@@ -18145,7 +18044,7 @@ dependencies = [
 name = "sp-consensus-beefy"
 version = "13.0.0"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "lazy_static",
  "parity-scale-codec",
  "scale-info",
@@ -18220,7 +18119,7 @@ dependencies = [
 name = "sp-core"
 version = "28.0.0"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "bandersnatch_vrfs",
  "bip39",
  "bitflags 1.3.2",
@@ -18229,16 +18128,16 @@ dependencies = [
  "bs58 0.5.0",
  "criterion 0.4.0",
  "dyn-clonable",
- "ed25519-zebra 3.1.0",
+ "ed25519-zebra",
  "futures",
  "hash-db",
  "hash256-std-hasher",
  "impl-serde",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "lazy_static",
  "libsecp256k1",
  "log",
- "merlin 3.0.0",
+ "merlin",
  "parity-scale-codec",
  "parking_lot 0.12.1",
  "paste",
@@ -18504,7 +18403,7 @@ dependencies = [
 name = "sp-mmr-primitives"
 version = "26.0.0"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "ckb-merkle-mountain-range",
  "log",
  "parity-scale-codec",
@@ -18735,7 +18634,7 @@ dependencies = [
 name = "sp-state-machine"
 version = "0.35.0"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "assert_matches",
  "hash-db",
  "log",
@@ -18760,7 +18659,7 @@ name = "sp-statement-store"
 version = "10.0.0"
 dependencies = [
  "aes-gcm 0.10.3",
- "curve25519-dalek 4.1.1",
+ "curve25519-dalek 4.1.3",
  "ed25519-dalek",
  "hkdf",
  "parity-scale-codec",
@@ -18888,7 +18787,7 @@ name = "sp-trie"
 version = "29.0.0"
 dependencies = [
  "ahash 0.8.7",
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "criterion 0.4.0",
  "hash-db",
  "lazy_static",
@@ -19070,7 +18969,7 @@ dependencies = [
 name = "staging-node-cli"
 version = "3.0.0-dev"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "assert_cmd",
  "clap 4.4.18",
  "clap_complete",
@@ -19216,7 +19115,7 @@ version = "2.0.0"
 name = "staging-xcm"
 version = "7.0.0"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "bounded-collections",
  "derivative",
  "environmental",
@@ -19387,13 +19286,13 @@ dependencies = [
 
 [[package]]
 name = "substrate-bip39"
-version = "0.4.5"
+version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e620c7098893ba667438b47169c00aacdd9e7c10e042250ce2b60b087ec97328"
+checksum = "6a7590dc041b9bc2825e52ce5af8416c73dbe9d0654402bfd4b4941938b94d8f"
 dependencies = [
  "hmac 0.11.0",
  "pbkdf2 0.8.0",
- "schnorrkel 0.9.1",
+ "schnorrkel 0.11.4",
  "sha2 0.9.9",
  "zeroize",
 ]
@@ -19517,7 +19416,7 @@ dependencies = [
 name = "substrate-test-client"
 version = "2.0.1"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "async-trait",
  "futures",
  "parity-scale-codec",
@@ -19543,7 +19442,7 @@ dependencies = [
 name = "substrate-test-runtime"
 version = "2.0.0"
 dependencies = [
- "array-bytes 6.1.0",
+ "array-bytes 6.2.3",
  "frame-executive",
  "frame-support",
  "frame-system",
@@ -21970,7 +21869,7 @@ version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fb66477291e7e8d2b0ff1bcb900bf29489a9692816d79874bea351e7a8b6de96"
 dependencies = [
- "curve25519-dalek 4.1.1",
+ "curve25519-dalek 4.1.3",
  "rand_core 0.6.4",
  "serde",
  "zeroize",
