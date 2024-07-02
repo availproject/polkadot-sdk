@@ -637,7 +637,19 @@ impl<T> CustomDispatchFee<T> for (Weight, DispatchClass, DispatchFeeModifier) {
 	}
 }
 
+impl<T> CustomDispatchFee<T> for (Weight, DispatchClass, Pays) {
+	fn custom_dispatch_fee(&self, _: T) -> DispatchFeeModifier {
+		DispatchFeeModifier::default()
+	}
+}
+
 // TODO: Eventually remove these
+
+impl<T> CustomDispatchFee<T> for u64 {
+	fn custom_dispatch_fee(&self, _: T) -> DispatchFeeModifier {
+		DispatchFeeModifier::default()
+	}
+}
 
 impl<T> ClassifyDispatch<T> for u64 {
 	fn classify_dispatch(&self, _: T) -> DispatchClass {
@@ -675,6 +687,12 @@ impl<T> PaysFee<T> for (u64, DispatchClass, Pays) {
 	}
 }
 
+impl<T> CustomDispatchFee<T> for (u64, DispatchClass, Pays) {
+	fn custom_dispatch_fee(&self, _: T) -> DispatchFeeModifier {
+		DispatchFeeModifier::default()
+	}
+}
+
 impl<T> WeighData<T> for (u64, DispatchClass) {
 	fn weigh_data(&self, args: T) -> Weight {
 		return self.0.weigh_data(args)
@@ -693,6 +711,12 @@ impl<T> PaysFee<T> for (u64, DispatchClass) {
 	}
 }
 
+impl<T> CustomDispatchFee<T> for (u64, DispatchClass) {
+	fn custom_dispatch_fee(&self, _: T) -> DispatchFeeModifier {
+		DispatchFeeModifier::default()
+	}
+}
+
 impl<T> WeighData<T> for (u64, Pays) {
 	fn weigh_data(&self, args: T) -> Weight {
 		return self.0.weigh_data(args)
@@ -708,6 +732,12 @@ impl<T> ClassifyDispatch<T> for (u64, Pays) {
 impl<T> PaysFee<T> for (u64, Pays) {
 	fn pays_fee(&self, _: T) -> Pays {
 		self.1
+	}
+}
+
+impl<T> CustomDispatchFee<T> for (u64, Pays) {
+	fn custom_dispatch_fee(&self, _: T) -> DispatchFeeModifier {
+		DispatchFeeModifier::default()
 	}
 }
 
