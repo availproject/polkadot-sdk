@@ -1,0 +1,25 @@
+[package]
+description = "Substrate network types"
+name = "sc-network-types"
+version = "0.10.0"
+license = "GPL-3.0-or-later WITH Classpath-exception-2.0"
+authors.workspace = true
+edition.workspace = true
+homepage = "https://substrate.io"
+repository.workspace = true
+documentation = "https://docs.rs/sc-network-types"
+
+[dependencies]
+bs58 = "0.5.0"
+ed25519-dalek = "2.1"
+libp2p-identity = { version = "0.2.3", features = ["ed25519", "peerid", "rand"] }
+litep2p = "0.5.0"
+log = "0.4.21"
+multiaddr = "0.18.1"
+multihash = "0.19.1"
+rand = "0.8.5"
+thiserror = "1.0.48"
+zeroize = "1.7.0"
+
+[dev-dependencies]
+quickcheck = "1.0.3"
