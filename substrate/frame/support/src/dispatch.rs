@@ -613,6 +613,31 @@ impl<T> ClassifyDispatch<T> for (Weight, DispatchClass, Pays) {
 	}
 }
 
+// To support legacy v1 weights 
+impl<T> CustomDispatchFee<T> for u64 {
+	fn custom_dispatch_fee(&self, _: T) -> DispatchFeeModifier {
+		DispatchFeeModifier::default()
+	}
+}
+
+impl<T> CustomDispatchFee<T> for (u64, DispatchClass) {
+	fn custom_dispatch_fee(&self, _: T) -> DispatchFeeModifier {
+		DispatchFeeModifier::default()
+	}
+}
+
+impl<T> CustomDispatchFee<T> for (u64, DispatchFeeModifier) {
+	fn custom_dispatch_fee(&self, _: T) -> DispatchFeeModifier {
+		self.1
+	}
+}
+
+impl<T> CustomDispatchFee<T> for (u64, DispatchClass, DispatchFeeModifier) {
+	fn custom_dispatch_fee(&self, _: T) -> DispatchFeeModifier {
+		self.2
+	}
+}
+
 impl<T> CustomDispatchFee<T> for Weight {
 	fn custom_dispatch_fee(&self, _: T) -> DispatchFeeModifier {
 		DispatchFeeModifier::default()

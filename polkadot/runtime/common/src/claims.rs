@@ -421,10 +421,9 @@ pub mod pallet {
 		#[pallet::call_index(3)]
 		#[pallet::weight((
 			T::WeightInfo::attest(),
-			DispatchClass::Normal,
-			Pays::No
+			DispatchClass::Normal
 		))]
-		pub fn attest(origin: OriginFor<T>, statement: Vec<u8>) -> DispatchResult {
+		pub fn attest(origin: OriginFor<T>, statement: Vec<u8>) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
 			let signer = Preclaims::<T>::get(&who).ok_or(Error::<T>::SenderHasNoClaim)?;
 			if let Some(s) = Signing::<T>::get(signer) {
@@ -432,7 +431,7 @@ pub mod pallet {
 			}
 			Self::process_claim(signer, who.clone())?;
 			Preclaims::<T>::remove(&who);
-			Ok(())
+			Ok(Pays::No.into())
 		}
 
 		#[pallet::call_index(4)]
