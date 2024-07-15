@@ -22,12 +22,13 @@ log = "0.4"
 parking_lot = "0.12.1"
 thiserror = "1.0"
 wasm-timer = "0.2.5"
-prometheus = { package = "substrate-prometheus-endpoint", path = "../../../utils/prometheus" }
+prometheus-endpoint = { package = "substrate-prometheus-endpoint", path = "../../../utils/prometheus" }
 sc-client-api = { path = "../../api" }
 sc-consensus = { path = "../common" }
 sc-network = { path = "../../network" }
 sc-network-gossip = { path = "../../network-gossip" }
 sc-network-sync = { path = "../../network/sync" }
+sc-network-types = { path = "../../network/types" }
 sc-utils = { path = "../../utils" }
 sp-api = { path = "../../../primitives/api" }
 sp-application-crypto = { path = "../../../primitives/application-crypto" }
@@ -42,7 +43,6 @@ sp-mmr-primitives = { path = "../../../primitives/merkle-mountain-range" }
 sp-runtime = { path = "../../../primitives/runtime" }
 tokio = "1.22.0"
 
-
 [dev-dependencies]
 serde = "1.0.195"
 tempfile = "3.1.0"
@@ -50,5 +50,15 @@ sc-block-builder = { path = "../../block-builder" }
 sc-network-test = { path = "../../network/test" }
 sp-consensus-grandpa = { path = "../../../primitives/consensus/grandpa" }
 sp-keyring = { path = "../../../primitives/keyring" }
+sp-mmr-primitives = { path = "../../../primitives/merkle-mountain-range" }
 sp-tracing = { path = "../../../primitives/tracing" }
 substrate-test-runtime-client = { path = "../../../test-utils/runtime/client" }
+
+[features]
+# This feature adds BLS crypto primitives. It should not be used in production since
+# the BLS implementation and interface may still be subject to significant change.
+bls-experimental = [
+	"sp-application-crypto/bls-experimental",
+	"sp-consensus-beefy/bls-experimental",
+	"sp-core/bls-experimental",
+]

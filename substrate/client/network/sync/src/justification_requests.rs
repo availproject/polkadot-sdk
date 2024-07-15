@@ -16,14 +16,18 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+//! Justification requests scheduling. [`ExtraRequests`] manages requesting justifications
+//! from peers taking into account forks and their finalization (dropping pending requests
+//! that don't make sense after one of the forks is finalized).
+
 use crate::{
 	request_metrics::Metrics,
 	strategy::chain_sync::{PeerSync, PeerSyncState},
 	LOG_TARGET,
 };
 use fork_tree::ForkTree;
-use libp2p::PeerId;
 use log::{debug, trace, warn};
+use sc_network_types::PeerId;
 use sp_blockchain::Error as ClientError;
 use sp_runtime::traits::{Block as BlockT, NumberFor, Zero};
 use std::{

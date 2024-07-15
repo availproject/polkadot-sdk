@@ -24,6 +24,7 @@ parking_lot = "0.12.1"
 schnellru = "0.2.1"
 thiserror = "1.0.48"
 sp-api = { path = "../api" }
+sp-core = { path = "../core" }
 sp-consensus = { path = "../consensus/common" }
 sp-database = { path = "../database" }
 sp-runtime = { path = "../runtime" }

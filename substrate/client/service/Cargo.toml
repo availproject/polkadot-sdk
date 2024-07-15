@@ -28,7 +28,7 @@ runtime-benchmarks = [
 ]
 
 [dependencies]
-jsonrpsee = { version = "0.20.3", features = ["server"] }
+jsonrpsee = { version = "0.23.2", features = ["server"] }
 thiserror = "1.0.48"
 futures = "0.3.21"
 rand = "0.8.5"
@@ -54,10 +54,10 @@ sp-consensus = { path = "../../primitives/consensus/common" }
 sc-consensus = { path = "../consensus/common" }
 sp-storage = { path = "../../primitives/storage" }
 sc-network = { path = "../network" }
-sc-network-bitswap = { path = "../network/bitswap" }
 sc-network-common = { path = "../network/common" }
 sc-network-light = { path = "../network/light" }
 sc-network-sync = { path = "../network/sync" }
+sc-network-types = { path = "../network/types" }
 sc-network-transactions = { path = "../network/transactions" }
 sc-chain-spec = { path = "../chain-spec" }
 sc-client-api = { path = "../api" }
@@ -84,6 +84,7 @@ tokio = { version = "1.22.0", features = ["parking_lot", "rt-multi-thread", "tim
 tempfile = "3.1.0"
 directories = "5.0.1"
 static_init = "1.0.3"
+schnellru = "0.2.1"
 
 [dev-dependencies]
 substrate-test-runtime-client = { path = "../../test-utils/runtime/client" }

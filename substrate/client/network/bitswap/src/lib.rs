@@ -22,7 +22,7 @@
 
 use cid::{self, Version};
 use futures::StreamExt;
-use libp2p_identity::PeerId;
+use sc_network_types::PeerId;
 use log::{debug, error, trace};
 use prost::Message;
 use sc_client_api::BlockBackend;

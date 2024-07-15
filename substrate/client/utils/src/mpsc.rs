@@ -133,6 +133,11 @@ impl<T> TracingUnboundedSender<T> {
 	pub fn len(&self) -> usize {
 		self.inner.len()
 	}
+
+	/// The name of this receiver
+	pub fn name(&self) -> &'static str {
+		self.name
+	}
 }
 
 impl<T> TracingUnboundedReceiver<T> {
@@ -156,6 +161,11 @@ impl<T> TracingUnboundedReceiver<T> {
 	/// The number of elements in the channel (proxy function to [`async_channel::Receiver`]).
 	pub fn len(&self) -> usize {
 		self.inner.len()
+	}
+
+	/// The name of this receiver
+	pub fn name(&self) -> &'static str {
+		self.name
 	}
 }
 
