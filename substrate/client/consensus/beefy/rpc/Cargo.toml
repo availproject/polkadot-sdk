@@ -22,6 +22,7 @@ thiserror = "1.0"
 sc-consensus-beefy = { path = ".." }
 sp-consensus-beefy = { path = "../../../../primitives/consensus/beefy" }
 sc-rpc = { path = "../../../rpc" }
+sp-application-crypto = { path = "../../../../primitives/application-crypto" }
 sp-core = { path = "../../../../primitives/core" }
 sp-runtime = { path = "../../../../primitives/runtime" }
 
