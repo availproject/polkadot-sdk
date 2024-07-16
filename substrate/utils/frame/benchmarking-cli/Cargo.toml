@@ -37,6 +37,7 @@ frame-benchmarking = { path = "../../../frame/benchmarking" }
 frame-support = { path = "../../../frame/support" }
 frame-system = { path = "../../../frame/system" }
 sc-block-builder = { path = "../../../client/block-builder" }
+sc-chain-spec = { path = "../../../client/chain-spec" }
 sc-cli = { path = "../../../client/cli", default-features = false }
 sc-client-api = { path = "../../../client/api" }
 sc-client-db = { path = "../../../client/db", default-features = false }
@@ -50,6 +51,7 @@ sp-database = { path = "../../../primitives/database" }
 sp-externalities = { path = "../../../primitives/externalities" }
 sp-inherents = { path = "../../../primitives/inherents" }
 sp-keystore = { path = "../../../primitives/keystore" }
+sp-genesis-builder = { path = "../../../primitives/genesis-builder" }
 sp-runtime = { path = "../../../primitives/runtime" }
 sp-state-machine = { path = "../../../primitives/state-machine" }
 sp-storage = { path = "../../../primitives/storage" }
