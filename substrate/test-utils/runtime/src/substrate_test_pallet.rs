@@ -21,7 +21,7 @@
 //! functioning runtime. Some calls are allowed to be submitted as unsigned extrinsics, however most
 //! of them requires signing. Refer to `pallet::Call` for further details.
 
-use frame_support::{pallet_prelude::*, storage};
+use frame_support::{pallet_prelude::*, storage, weights::Weight};
 use sp_core::sr25519::Public;
 use sp_runtime::{
 	traits::Hash,
@@ -73,14 +73,14 @@ pub mod pallet {
 	impl<T: Config> Pallet<T> {
 		/// Legacy call used in transaction pool benchmarks.
 		#[pallet::call_index(0)]
-		#[pallet::weight(100)]
+		#[pallet::weight(Weight::from_parts(100,0))]
 		pub fn bench_call(_origin: OriginFor<T>, _transfer: TransferData) -> DispatchResult {
 			Ok(())
 		}
 
 		/// Implicitly fill a block body with some data.
 		#[pallet::call_index(1)]
-		#[pallet::weight(100)]
+		#[pallet::weight(Weight::from_parts(100,0))]
 		pub fn include_data(origin: OriginFor<T>, _data: Vec<u8>) -> DispatchResult {
 			frame_system::ensure_signed(origin)?;
 			Ok(())
@@ -88,7 +88,7 @@ pub mod pallet {
 
 		/// Put/delete some data from storage. Intended to use as an unsigned extrinsic.
 		#[pallet::call_index(2)]
-		#[pallet::weight(100)]
+		#[pallet::weight(Weight::from_parts(100,0))]
 		pub fn storage_change(
 			_origin: OriginFor<T>,
 			key: Vec<u8>,
@@ -103,7 +103,7 @@ pub mod pallet {
 
 		/// Write a key value pair to the offchain database.
 		#[pallet::call_index(3)]
-		#[pallet::weight(100)]
+		#[pallet::weight(Weight::from_parts(100,0))]
 		pub fn offchain_index_set(
 			origin: OriginFor<T>,
 			key: Vec<u8>,
@@ -116,7 +116,7 @@ pub mod pallet {
 
 		/// Remove a key and an associated value from the offchain database.
 		#[pallet::call_index(4)]
-		#[pallet::weight(100)]
+		#[pallet::weight(Weight::from_parts(100,0))]
 		pub fn offchain_index_clear(origin: OriginFor<T>, key: Vec<u8>) -> DispatchResult {
 			frame_system::ensure_signed(origin)?;
 			sp_io::offchain_index::clear(&key);
@@ -125,7 +125,7 @@ pub mod pallet {
 
 		/// Create an index for this call.
 		#[pallet::call_index(5)]
-		#[pallet::weight(100)]
+		#[pallet::weight(Weight::from_parts(100,0))]
 		pub fn indexed_call(origin: OriginFor<T>, data: Vec<u8>) -> DispatchResult {
 			frame_system::ensure_signed(origin)?;
 			let content_hash = sp_io::hashing::blake2_256(&data);
@@ -138,7 +138,7 @@ pub mod pallet {
 		/// Deposit given digest items into the system storage. They will be included in a header
 		/// during finalization.
 		#[pallet::call_index(6)]
-		#[pallet::weight(100)]
+		#[pallet::weight(Weight::from_parts(100,0))]
 		pub fn deposit_log_digest_item(
 			_origin: OriginFor<T>,
 			log: sp_runtime::generic::DigestItem,
@@ -149,7 +149,7 @@ pub mod pallet {
 
 		/// This call is validated as `ValidTransaction` with given priority.
 		#[pallet::call_index(7)]
-		#[pallet::weight(100)]
+		#[pallet::weight(Weight::from_parts(100,0))]
 		pub fn call_with_priority(
 			_origin: OriginFor<T>,
 			_priority: TransactionPriority,
@@ -159,7 +159,7 @@ pub mod pallet {
 
 		/// This call is validated as non-propagable `ValidTransaction`.
 		#[pallet::call_index(8)]
-		#[pallet::weight(100)]
+		#[pallet::weight(Weight::from_parts(100,0))]
 		pub fn call_do_not_propagate(_origin: OriginFor<T>) -> DispatchResult {
 			Ok(())
 		}
@@ -176,7 +176,7 @@ pub mod pallet {
 		///
 		/// Panics if it can not read `X` times.
 		#[pallet::call_index(10)]
-		#[pallet::weight(100)]
+		#[pallet::weight(Weight::from_parts(100,0))]
 		pub fn read(_origin: OriginFor<T>, count: u32) -> DispatchResult {
 			Self::execute_read(count, false)
 		}
@@ -185,7 +185,7 @@ pub mod pallet {
 		///
 		/// Returns `Ok` if it didn't read anything.
 		#[pallet::call_index(11)]
-		#[pallet::weight(100)]
+		#[pallet::weight(Weight::from_parts(100,0))]
 		pub fn read_and_panic(_origin: OriginFor<T>, count: u32) -> DispatchResult {
 			Self::execute_read(count, true)
 		}
