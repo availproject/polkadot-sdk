@@ -38,7 +38,7 @@ use std::{collections::HashMap, net::SocketAddr};
 
 use codec::{Decode, Encode};
 use futures::{pin_mut, FutureExt, StreamExt};
-use jsonrpsee::{core::Error as JsonRpseeError, RpcModule};
+use jsonrpsee::RpcModule;
 use log::{debug, error, warn};
 use sc_client_api::{blockchain::HeaderBackend, BlockBackend, BlockchainEvents, ProofProvider};
 use sc_network::{
@@ -109,17 +109,14 @@ impl RpcHandlers {
 	pub async fn rpc_query(
 		&self,
 		json_query: &str,
-	) -> Result<(String, tokio::sync::mpsc::Receiver<String>), JsonRpseeError> {
+	) -> Result<(String, tokio::sync::mpsc::Receiver<String>), serde_json::Error> {
 		// Because `tokio::sync::mpsc::channel` is used under the hood
 		// it will panic if it's set to usize::MAX.
 		//
 		// This limit is used to prevent panics and is large enough.
 		const TOKIO_MPSC_MAX_SIZE: usize = tokio::sync::Semaphore::MAX_PERMITS;
 
-		self.0
-			.raw_json_request(json_query, TOKIO_MPSC_MAX_SIZE)
-			.await
-			.map(|(method_res, recv)| (method_res.result, recv))
+		self.0.raw_json_request(json_query, TOKIO_MPSC_MAX_SIZE).await
 	}
 
 	/// Provides access to the underlying `RpcModule`
@@ -241,7 +238,7 @@ pub async fn build_system_rpc_future<
 		// Answer incoming RPC requests.
 		let Some(req) = rpc_rx.next().await else {
 			debug!("RPC requests stream has terminated, shutting down the system RPC future.");
-			return
+			return;
 		};
 
 		match req {
@@ -290,7 +287,7 @@ pub async fn build_system_rpc_future<
 						let _ = sender.send(network_state);
 					}
 				} else {
-					break
+					break;
 				}
 			},
 			sc_rpc::system::Request::NetworkAddReservedPeer(peer_addr, sender) => {
@@ -319,7 +316,7 @@ pub async fn build_system_rpc_future<
 						reserved_peers.iter().map(|peer_id| peer_id.to_base58()).collect();
 					let _ = sender.send(reserved_peers);
 				} else {
-					break
+					break;
 				}
 			},
 			sc_rpc::system::Request::NodeRoles(sender) => {
@@ -406,6 +403,7 @@ where
 		id_provider: rpc_id_provider,
 		cors: config.rpc_cors.as_ref(),
 		tokio_handle: config.tokio_handle.clone(),
+		rate_limit: config.rpc_rate_limit,
 	};
 
 	// TODO: https://github.com/paritytech/substrate/issues/13773
@@ -482,7 +480,7 @@ where
 			Ok(uxt) => uxt,
 			Err(e) => {
 				debug!("Transaction invalid: {:?}", e);
-				return Box::pin(futures::future::ready(TransactionImport::Bad))
+				return Box::pin(futures::future::ready(TransactionImport::Bad));
 			},
 		};
 
@@ -495,8 +493,9 @@ where
 			match import_future.await {
 				Ok(_) => TransactionImport::NewGood,
 				Err(e) => match e.into_pool_error() {
-					Ok(sc_transaction_pool_api::error::Error::AlreadyImported(_)) =>
-						TransactionImport::KnownGood,
+					Ok(sc_transaction_pool_api::error::Error::AlreadyImported(_)) => {
+						TransactionImport::KnownGood
+					},
 					Ok(e) => {
 						debug!("Error adding transaction to the pool: {:?}", e);
 						TransactionImport::Bad
