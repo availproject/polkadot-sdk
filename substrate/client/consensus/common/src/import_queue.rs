@@ -251,6 +251,7 @@ pub(crate) async fn import_single_block_metered_v2<B: BlockT, V: Verifier<B>>(
 	let start_timestamp = BlockMetrics::get_current_timestamp_in_ms_or_default();
 	let res =
 		import_single_block_metered(import_handle, block_origin, block, verifier, metrics).await;
+	dbg!(&res);
 	let end_timestamp = BlockMetrics::get_current_timestamp_in_ms_or_default();
 
 	let interval = IntervalWithBlockInformation {
