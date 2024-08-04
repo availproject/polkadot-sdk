@@ -31,7 +31,7 @@ pub enum IntervalKind {
 }
 
 /// Interval information bundled together with block information.
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Debug)]
 pub struct IntervalWithBlockInformation {
 	///
 	pub kind: IntervalKind,
@@ -46,7 +46,7 @@ pub struct IntervalWithBlockInformation {
 }
 
 ///
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct BlockRequestsDetail {
 	///
 	pub current_queue_size: u32,
@@ -57,7 +57,7 @@ pub struct BlockRequestsDetail {
 }
 
 ///
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct BlockMetrics {
 	///
 	intervals: Vec<IntervalWithBlockInformation>,
@@ -89,6 +89,10 @@ static BLOCK_METRICS: Mutex<BlockMetrics> = Mutex::new(BlockMetrics::new());
 impl BlockMetrics {
 	///
 	pub fn observe_interval(value: IntervalWithBlockInformation) {
+		println!(
+			"Observing new Interval. BlockHash={:?}, BlockNumber={:?}, Kind={:?}",
+			value.block_hash, value.block_number, value.kind
+		);
 		let Ok(mut lock) = BLOCK_METRICS.lock() else {
 			return;
 		};
@@ -108,6 +112,11 @@ impl BlockMetrics {
 		timestamp: u64,
 		is_start: bool,
 	) {
+		println!(
+			"Observing Partial Interval. BlockHash={:?}, BlockNumber={:?}, Kind={:?}",
+			block_hash, block_number, kind
+		);
+
 		let mut entry = {
 			let Ok(mut lock) = BLOCK_METRICS.lock() else {
 				return;
@@ -149,6 +158,11 @@ impl BlockMetrics {
 
 	///
 	pub fn observe_block_request(value: BlockRequestsDetail) {
+		println!(
+			"Observing Block Request. RH={:?}, CQS={:?}, TM={:?}",
+			value.requests_handled, value.current_queue_size, value.time_frame
+		);
+
 		let Ok(mut lock) = BLOCK_METRICS.lock() else {
 			return;
 		};
@@ -296,6 +310,10 @@ impl CustomTelemetryWorker {
 		let (block_intervals, block_requests) =
 			Self::get_and_filter_data(filter_intervals, filter_block_requests);
 
+		dbg!(&block_intervals);
+		dbg!(&block_requests);
+		println!("Done");
+
 		if block_intervals.len() > 0 || block_requests.len() > 0 {
 			telemetry!(
 				self.handle;
@@ -312,6 +330,7 @@ impl CustomTelemetryWorker {
 		filter_block_requests: Option<fn(Vec<BlockRequestsDetail>) -> Vec<BlockRequestsDetail>>,
 	) -> (Vec<BlockIntervalFromNode>, Vec<BlockRequestsDetail>) {
 		let metrics = BlockMetrics::take_metrics().unwrap_or_default();
+		dbg!(&metrics);
 
 		let block_intervals = external::prepare_data(metrics.intervals);
 		let block_intervals = match filter_intervals {
@@ -494,8 +513,10 @@ mod tests {
 		// Second test. Filter Interval data 1
 		setup_scenartion();
 
-		let (block_intervals, block_requests) =
-			CustomTelemetryWorker::get_and_filter_data(Some(no_data_interval), Some(no_data_request));
+		let (block_intervals, block_requests) = CustomTelemetryWorker::get_and_filter_data(
+			Some(no_data_interval),
+			Some(no_data_request),
+		);
 		assert_eq!(block_intervals.len(), 0);
 		assert_eq!(block_requests.len(), 0);
 
@@ -530,7 +551,6 @@ mod tests {
 		while value.len() > 1 {
 			value.pop();
 		}
-
 
 		value
 	}
