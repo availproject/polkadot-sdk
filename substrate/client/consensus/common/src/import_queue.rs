@@ -177,8 +177,8 @@ impl<N: std::fmt::Debug + PartialEq> BlockImportStatus<N> {
 	/// Returns the imported block number.
 	pub fn number(&self) -> &N {
 		match self {
-			BlockImportStatus::ImportedKnown(n, _) |
-			BlockImportStatus::ImportedUnknown(n, _, _) => n,
+			BlockImportStatus::ImportedKnown(n, _)
+			| BlockImportStatus::ImportedUnknown(n, _, _) => n,
 		}
 	}
 }
@@ -246,6 +246,8 @@ pub(crate) async fn import_single_block_metered_v2<B: BlockT, V: Verifier<B>>(
 		.map(|h| (*h.number()).try_into().unwrap_or_default())
 		.unwrap_or_default();
 
+	println!("Import Single Block. Hash: {:?}, Number: {:?}", block_hash, block_number);
+
 	let start_timestamp = BlockMetrics::get_current_timestamp_in_ms_or_default();
 	let res =
 		import_single_block_metered(import_handle, block_origin, block, verifier, metrics).await;
@@ -284,7 +286,7 @@ pub(crate) async fn import_single_block_metered<B: BlockT, V: Verifier<B>>(
 			} else {
 				debug!(target: LOG_TARGET, "Header {} was not provided ", block.hash);
 			}
-			return Err(BlockImportError::IncompleteHeader(peer))
+			return Err(BlockImportError::IncompleteHeader(peer));
 		},
 	};
 
@@ -299,8 +301,9 @@ pub(crate) async fn import_single_block_metered<B: BlockT, V: Verifier<B>>(
 			trace!(target: LOG_TARGET, "Block already in chain {}: {:?}", number, hash);
 			Ok(BlockImportStatus::ImportedKnown(number, peer))
 		},
-		Ok(ImportResult::Imported(aux)) =>
-			Ok(BlockImportStatus::ImportedUnknown(number, aux, peer)),
+		Ok(ImportResult::Imported(aux)) => {
+			Ok(BlockImportStatus::ImportedUnknown(number, aux, peer))
+		},
 		Ok(ImportResult::MissingState) => {
 			debug!(
 				target: LOG_TARGET,
