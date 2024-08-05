@@ -1140,6 +1140,7 @@ where
 
 		// known block case
 		if known || self.is_already_downloading(&hash) {
+			println!("Known Block: PeerID={:?}", peer_id.to_string());
 			trace!(target: LOG_TARGET, "Known block announce from {}: {}", peer_id, hash);
 			if let Some(target) = self.fork_targets.get_mut(&hash) {
 				target.peers.insert(peer_id);
