@@ -5,10 +5,12 @@
 //
 
 use std::{
+	collections::HashMap,
 	sync::Mutex,
 	time::{Duration, SystemTimeError},
 };
 
+use libp2p::PeerId;
 use serde::Serialize;
 use wasm_timer::{SystemTime, UNIX_EPOCH};
 
@@ -30,19 +32,68 @@ pub enum IntervalKind {
 	Import = 2,
 }
 
-/// Interval information bundled together with block information.
-#[derive(Serialize, Clone, Debug)]
-pub struct IntervalWithBlockInformation {
-	///
-	pub kind: IntervalKind,
-	///
-	pub block_number: u64,
-	///
-	pub block_hash: String,
+#[derive(Debug, Clone, Default)]
+pub struct BlockIntervals {
+	proposal: Option<IntervalDetailsProposal>,
+	import: Option<IntervalDetailsImport>,
+	syncs: Vec<IntervalDetailsSync>,
+}
+
+///
+#[derive(Debug, Clone)]
+pub enum IntervalDetails {
+	Proposal(IntervalDetailsProposal),
+	Import(IntervalDetailsImport),
+	Sync(IntervalDetailsSync),
+}
+
+impl From<IntervalDetailsProposal> for IntervalDetails {
+	fn from(value: IntervalDetailsProposal) -> Self {
+		Self::Proposal(value)
+	}
+}
+
+impl From<IntervalDetailsImport> for IntervalDetails {
+	fn from(value: IntervalDetailsImport) -> Self {
+		Self::Import(value)
+	}
+}
+
+impl From<IntervalDetailsSync> for IntervalDetails {
+	fn from(value: IntervalDetailsSync) -> Self {
+		Self::Sync(value)
+	}
+}
+
+///
+#[derive(Debug, Clone)]
+pub struct IntervalDetailsProposal {
 	///
 	pub start_timestamp: u64,
 	///
 	pub end_timestamp: u64,
+}
+
+///
+#[derive(Debug, Clone)]
+pub struct IntervalDetailsImport {
+	///
+	pub peer_id: Option<PeerId>,
+	///
+	pub start_timestamp: u64,
+	///
+	pub end_timestamp: u64,
+}
+
+///
+#[derive(Debug, Clone)]
+pub struct IntervalDetailsSync {
+	///
+	pub peer_id: PeerId,
+	///
+	pub start_timestamp: Option<u64>,
+	///
+	pub end_timestamp: Option<u64>,
 }
 
 ///
@@ -56,13 +107,14 @@ pub struct BlockRequestsDetail {
 	pub time_frame: u64,
 }
 
+const MAX_SYNCS_PER_BLOCK: usize = 50;
+const MAX_BLOCKS_PER_HEIGHT: usize = 50;
+
 ///
 #[derive(Default, Debug)]
 pub struct BlockMetrics {
 	///
-	intervals: Vec<IntervalWithBlockInformation>,
-	///
-	partial_intervals: Vec<IntervalWithBlockInformation>,
+	intervals: Option<HashMap<u64, HashMap<String, BlockIntervals>>>,
 	///
 	block_requests: Vec<BlockRequestsDetail>,
 	///
@@ -71,89 +123,66 @@ pub struct BlockMetrics {
 	max_block_request_buffer_size: usize,
 }
 
+static BLOCK_METRICS: Mutex<BlockMetrics> = Mutex::new(BlockMetrics::new());
+
 impl BlockMetrics {
 	///
 	pub const fn new() -> Self {
 		Self {
-			intervals: Vec::new(),
-			partial_intervals: Vec::new(),
+			intervals: None,
 			block_requests: Vec::new(),
 			max_interval_buffer_size: 0,
 			max_block_request_buffer_size: 0,
 		}
 	}
-}
 
-static BLOCK_METRICS: Mutex<BlockMetrics> = Mutex::new(BlockMetrics::new());
-
-impl BlockMetrics {
-	///
-	pub fn observe_interval(value: IntervalWithBlockInformation) {
-		println!(
-			"Observing new Interval. BlockHash={:?}, BlockNumber={:?}, Kind={:?}",
-			value.block_hash, value.block_number, value.kind
-		);
+	pub fn observe_interval(block_number: u64, block_hash: String, value: IntervalDetails) {
 		let Ok(mut lock) = BLOCK_METRICS.lock() else {
 			return;
 		};
+		let max_buffer_size = lock.max_interval_buffer_size;
 
-		lock.intervals.push(value);
-
-		if lock.intervals.len() > lock.max_interval_buffer_size {
-			lock.intervals.remove(0);
+		let intervals = lock.intervals.get_or_insert(HashMap::new());
+		if intervals.len() >= max_buffer_size {
+			return;
 		}
-	}
 
-	///
-	pub fn observe_interval_partial(
-		kind: IntervalKind,
-		block_number: u64,
-		block_hash: String,
-		timestamp: u64,
-		is_start: bool,
-	) {
-		println!(
-			"Observing Partial Interval. BlockHash={:?}, BlockNumber={:?}, Kind={:?}",
-			block_hash, block_number, kind
-		);
+		let block_height = intervals.entry(block_number).or_default();
+		if block_height.len() >= MAX_BLOCKS_PER_HEIGHT {
+			return;
+		}
 
-		let mut entry = {
-			let Ok(mut lock) = BLOCK_METRICS.lock() else {
-				return;
-			};
+		let block = block_height.entry(block_hash.clone()).or_default();
 
-			if is_start {
-				let value = IntervalWithBlockInformation {
-					kind,
-					block_number,
-					block_hash,
-					start_timestamp: timestamp,
-					end_timestamp: 0,
-				};
-
-				lock.partial_intervals.push(value);
-
-				if lock.partial_intervals.len() > lock.max_interval_buffer_size {
-					lock.partial_intervals.remove(0);
+		match value {
+			IntervalDetails::Proposal(v) => {
+				if block.proposal.is_some() {
+					return;
 				}
-
-				return;
-			}
-
-			let existing_entry_pos = lock.partial_intervals.iter_mut().position(|v| {
-				v.block_hash == block_hash && v.block_number == block_number && v.kind == kind
-			});
-
-			let Some(pos) = existing_entry_pos else {
-				return;
-			};
-
-			lock.partial_intervals.remove(pos)
+				block.proposal = Some(v);
+			},
+			IntervalDetails::Import(v) => {
+				if block.import.is_some() {
+					return;
+				}
+				block.import = Some(v);
+			},
+			IntervalDetails::Sync(v) => {
+				if let Some(details) = block.syncs.iter_mut().find(|b| b.peer_id == v.peer_id) {
+					if v.start_timestamp.is_some() {
+						details.start_timestamp = v.start_timestamp;
+					}
+					if v.end_timestamp.is_some() {
+						details.end_timestamp = v.end_timestamp;
+					}
+				} else {
+					if block.syncs.len() >= MAX_SYNCS_PER_BLOCK {
+						return;
+					}
+					block.syncs.push(v);
+				}
+			},
 		};
-
-		entry.end_timestamp = timestamp;
-
-		Self::observe_interval(entry);
 	}
 
 	///
@@ -198,19 +227,63 @@ impl BlockMetrics {
 	}
 }
 
-/// This will be send to the telemetry
+/// This will be send to the telemetry backend
 pub mod external {
 	use super::*;
 
 	///
 	#[derive(Debug, Serialize, Clone)]
 	pub struct IntervalFromNode {
+		//
+		pub peer_id: Option<String>,
 		///
 		pub kind: IntervalKind,
 		///
 		pub start_timestamp: u64,
 		///
 		pub end_timestamp: u64,
+	}
+
+	impl From<IntervalDetailsProposal> for IntervalFromNode {
+		fn from(value: IntervalDetailsProposal) -> Self {
+			Self {
+				peer_id: None,
+				kind: IntervalKind::Proposal,
+				start_timestamp: value.start_timestamp,
+				end_timestamp: value.end_timestamp,
+			}
+		}
+	}
+
+	impl From<IntervalDetailsImport> for IntervalFromNode {
+		fn from(value: IntervalDetailsImport) -> Self {
+			let peer_id = value.peer_id.and_then(|p| Some(p.to_string()));
+			Self {
+				peer_id,
+				kind: IntervalKind::Proposal,
+				start_timestamp: value.start_timestamp,
+				end_timestamp: value.end_timestamp,
+			}
+		}
+	}
+
+	impl TryFrom<IntervalDetailsSync> for IntervalFromNode {
+		type Error = ();
+
+		fn try_from(value: IntervalDetailsSync) -> Result<Self, Self::Error> {
+			let (start_timestamp, end_timestamp) =
+				match (value.start_timestamp, value.end_timestamp) {
+					(Some(s), Some(e)) => (s, e),
+					_ => return Err(()),
+				};
+
+			Ok(Self {
+				peer_id: Some(value.peer_id.to_string()),
+				kind: IntervalKind::Sync,
+				start_timestamp,
+				end_timestamp,
+			})
+		}
 	}
 
 	///
@@ -226,41 +299,50 @@ pub mod external {
 
 	///
 	pub fn prepare_data(
-		mut value: Vec<IntervalWithBlockInformation>,
+		value: Option<HashMap<u64, HashMap<String, BlockIntervals>>>,
 	) -> Vec<BlockIntervalFromNode> {
-		let mut output = Vec::with_capacity(value.len() / 2);
-		value.sort_by(|l, r| {
-			if l.block_number == r.block_number {
-				l.block_hash.cmp(&r.block_hash)
-			} else {
-				l.block_number.cmp(&r.block_number)
+		dbg!(&value);
+
+		let Some(block_heights) = value else {
+			return Vec::new();
+		};
+
+		let mut processed_blocks: Vec<BlockIntervalFromNode> = Vec::new();
+
+		for (block_number, forks) in block_heights {
+			for (block_hash, data) in forks {
+				let mut block = BlockIntervalFromNode {
+					block_number,
+					block_hash: block_hash.clone(),
+					intervals: Vec::new(),
+				};
+
+				if let Some(interval) = data.proposal {
+					block.intervals.push(interval.into())
+				}
+
+				let mut peer_id: Option<String> = None;
+				if let Some(interval) = data.import {
+					peer_id = interval.peer_id.and_then(|p| Some(p.to_string()));
+					block.intervals.push(interval.into())
+				}
+
+				let filtered_sync_data: Vec<IntervalFromNode> =
+					data.syncs.into_iter().filter_map(|v| v.try_into().ok()).collect();
+
+				if let Some(interval) = filtered_sync_data.iter().find(|i| i.peer_id == peer_id) {
+					block.intervals.push(interval.clone());
+				} else {
+					if let Some(interval) = filtered_sync_data.first() {
+						block.intervals.push(interval.clone());
+					}
+				}
+
+				processed_blocks.push(block);
 			}
-		});
-
-		let mut block = BlockIntervalFromNode::default();
-		for v in value {
-			let interval = IntervalFromNode {
-				kind: v.kind,
-				start_timestamp: v.start_timestamp,
-				end_timestamp: v.end_timestamp,
-			};
-
-			if (v.block_number != block.block_number || v.block_hash != block.block_hash)
-				&& block.block_number != u64::default()
-			{
-				output.push(std::mem::take(&mut block));
-			}
-
-			block.block_number = v.block_number;
-			block.block_hash = v.block_hash;
-			block.intervals.push(interval);
 		}
 
-		if block.block_number != u64::default() {
-			output.push(block);
-		}
-
-		output
+		processed_blocks
 	}
 }
 
@@ -311,7 +393,6 @@ impl CustomTelemetryWorker {
 			Self::get_and_filter_data(filter_intervals, filter_block_requests);
 
 		dbg!(&block_intervals);
-		dbg!(&block_requests);
 		println!("Done");
 
 		if block_intervals.len() > 0 || block_requests.len() > 0 {
@@ -330,7 +411,6 @@ impl CustomTelemetryWorker {
 		filter_block_requests: Option<fn(Vec<BlockRequestsDetail>) -> Vec<BlockRequestsDetail>>,
 	) -> (Vec<BlockIntervalFromNode>, Vec<BlockRequestsDetail>) {
 		let metrics = BlockMetrics::take_metrics().unwrap_or_default();
-		dbg!(&metrics);
 
 		let block_intervals = external::prepare_data(metrics.intervals);
 		let block_intervals = match filter_intervals {
@@ -345,213 +425,5 @@ impl CustomTelemetryWorker {
 		};
 
 		(block_intervals, block_requests)
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-
-	fn dummy_interval(block_number: Option<u64>) -> IntervalWithBlockInformation {
-		IntervalWithBlockInformation {
-			kind: IntervalKind::Import,
-			block_number: block_number.unwrap_or(0),
-			block_hash: "".to_string(),
-			start_timestamp: 0,
-			end_timestamp: 0,
-		}
-	}
-
-	fn observe_block_request(time_frame: u64) {
-		let value = BlockRequestsDetail { current_queue_size: 0, requests_handled: 0, time_frame };
-		BlockMetrics::observe_block_request(value);
-	}
-
-	fn reset_global_variable(buffer_size: usize) {
-		{
-			let mut lock = BLOCK_METRICS.lock().unwrap();
-			lock.max_interval_buffer_size = buffer_size;
-			lock.max_block_request_buffer_size = buffer_size;
-		}
-
-		_ = BlockMetrics::take_metrics().unwrap();
-	}
-
-	#[test]
-	fn buffer_interval_0_buffer_size() {
-		reset_global_variable(0);
-
-		BlockMetrics::observe_interval(dummy_interval(None));
-		let metrics = BlockMetrics::take_metrics().unwrap();
-		assert_eq!(metrics.intervals.len(), 0);
-	}
-
-	#[test]
-	fn buffer_interval_1_buffer_size() {
-		reset_global_variable(1);
-
-		BlockMetrics::observe_interval(dummy_interval(Some(0)));
-		let metrics = BlockMetrics::take_metrics().unwrap();
-		assert_eq!(metrics.intervals.len(), 1);
-		assert_eq!(metrics.intervals[0].block_number, 0);
-
-		BlockMetrics::observe_interval(dummy_interval(Some(1)));
-		let metrics = BlockMetrics::take_metrics().unwrap();
-		assert_eq!(metrics.intervals.len(), 1);
-		assert_eq!(metrics.intervals[0].block_number, 1);
-	}
-
-	#[test]
-	fn mem_take_works() {
-		const BUFFER_SIZE: usize = 10;
-		reset_global_variable(BUFFER_SIZE);
-
-		BlockMetrics::observe_interval(dummy_interval(Some(0)));
-		BlockMetrics::observe_interval_partial(IntervalKind::Sync, 0, "".to_string(), 0, true);
-		BlockMetrics::observe_interval_partial(IntervalKind::Sync, 10, "".to_string(), 0, true);
-		BlockMetrics::observe_interval_partial(IntervalKind::Sync, 10, "".to_string(), 0, false);
-
-		{
-			let lock = BLOCK_METRICS.lock().unwrap();
-			assert_eq!(lock.max_interval_buffer_size, BUFFER_SIZE);
-			assert_eq!(lock.intervals.len(), 2);
-			assert_eq!(lock.partial_intervals.len(), 1);
-			assert_eq!(lock.block_requests.len(), 0);
-		}
-
-		let old_metrics = BlockMetrics::take_metrics().unwrap();
-		assert_eq!(old_metrics.max_interval_buffer_size, BUFFER_SIZE);
-		assert_eq!(old_metrics.intervals.len(), 2);
-		assert_eq!(old_metrics.partial_intervals.len(), 1);
-		assert_eq!(old_metrics.block_requests.len(), 0);
-
-		let lock = BLOCK_METRICS.lock().unwrap();
-		assert_eq!(lock.max_interval_buffer_size, BUFFER_SIZE);
-		assert_eq!(lock.intervals.len(), 0);
-		assert_eq!(lock.partial_intervals.len(), 0);
-		assert_eq!(lock.block_requests.len(), 0);
-	}
-
-	#[test]
-	fn buffer_partial_interval_0_buffer_size() {
-		reset_global_variable(0);
-
-		BlockMetrics::observe_interval_partial(IntervalKind::Sync, 0, "".to_string(), 0, true);
-		let metrics = BlockMetrics::take_metrics().unwrap();
-		assert_eq!(metrics.partial_intervals.len(), 0);
-	}
-
-	#[test]
-	fn buffer_partial_interval_1_buffer_size() {
-		reset_global_variable(1);
-
-		BlockMetrics::observe_interval_partial(IntervalKind::Sync, 0, "".to_string(), 0, true);
-		let metrics = BlockMetrics::take_metrics().unwrap();
-		assert_eq!(metrics.partial_intervals.len(), 1);
-		assert_eq!(metrics.partial_intervals[0].block_number, 0);
-
-		BlockMetrics::observe_interval_partial(IntervalKind::Sync, 1, "".to_string(), 0, true);
-		let metrics = BlockMetrics::take_metrics().unwrap();
-		assert_eq!(metrics.partial_intervals.len(), 1);
-		assert_eq!(metrics.partial_intervals[0].block_number, 1);
-	}
-
-	#[test]
-	fn buffer_partial_interval_works() {
-		reset_global_variable(1);
-
-		BlockMetrics::observe_interval_partial(IntervalKind::Sync, 25, "".to_string(), 0, true);
-		{
-			let lock = BLOCK_METRICS.lock().unwrap();
-			assert_eq!(lock.partial_intervals.len(), 1);
-			assert_eq!(lock.partial_intervals[0].block_number, 25);
-		}
-
-		BlockMetrics::observe_interval_partial(IntervalKind::Sync, 25, "".to_string(), 0, false);
-		{
-			let lock = BLOCK_METRICS.lock().unwrap();
-			assert_eq!(lock.partial_intervals.len(), 0);
-			assert_eq!(lock.intervals.len(), 1);
-			assert_eq!(lock.intervals[0].block_number, 25);
-		}
-	}
-
-	#[test]
-	fn get_and_filter_data_works() {
-		reset_global_variable(10);
-		use IntervalKind::*;
-
-		let setup_scenartion = || {
-			BlockMetrics::observe_interval_partial(Import, 1, "".to_string(), 0, true);
-			BlockMetrics::observe_interval_partial(Import, 1, "".to_string(), 0, false);
-			BlockMetrics::observe_interval_partial(Sync, 1, "".to_string(), 0, true);
-			BlockMetrics::observe_interval_partial(Sync, 1, "".to_string(), 0, false);
-			BlockMetrics::observe_interval_partial(Proposal, 2, "".to_string(), 0, true);
-			BlockMetrics::observe_interval_partial(Proposal, 2, "".to_string(), 0, false);
-			BlockMetrics::observe_interval_partial(Proposal, 3, "".to_string(), 0, true);
-			observe_block_request(1);
-			observe_block_request(2);
-			observe_block_request(3);
-		};
-
-		setup_scenartion();
-
-		let (block_intervals, block_requests) =
-			CustomTelemetryWorker::get_and_filter_data(None, None);
-
-		assert_eq!(block_intervals.len(), 2);
-		assert_eq!(block_intervals[0].block_number, 1);
-		assert_eq!(block_intervals[0].block_number, 1);
-		assert_eq!(block_intervals[0].intervals.len(), 2);
-		assert_eq!(block_intervals[1].intervals.len(), 1);
-
-		assert_eq!(block_requests.len(), 3);
-		assert_eq!(block_requests[0].time_frame, 1);
-		assert_eq!(block_requests[1].time_frame, 2);
-		assert_eq!(block_requests[2].time_frame, 3);
-
-		// Second test. Filter Interval data 1
-		setup_scenartion();
-
-		let (block_intervals, block_requests) = CustomTelemetryWorker::get_and_filter_data(
-			Some(no_data_interval),
-			Some(no_data_request),
-		);
-		assert_eq!(block_intervals.len(), 0);
-		assert_eq!(block_requests.len(), 0);
-
-		// Third test. Filter Interval data 2
-		setup_scenartion();
-
-		let (block_intervals, block_requests) =
-			CustomTelemetryWorker::get_and_filter_data(Some(one_interval), Some(one_request));
-		assert_eq!(block_intervals.len(), 1);
-		assert_eq!(block_intervals[0].block_number, 1);
-		assert_eq!(block_requests.len(), 1);
-		assert_eq!(block_requests[0].time_frame, 1);
-	}
-
-	fn no_data_interval(_: Vec<BlockIntervalFromNode>) -> Vec<BlockIntervalFromNode> {
-		vec![]
-	}
-
-	fn no_data_request(_: Vec<BlockRequestsDetail>) -> Vec<BlockRequestsDetail> {
-		vec![]
-	}
-
-	fn one_interval(mut value: Vec<BlockIntervalFromNode>) -> Vec<BlockIntervalFromNode> {
-		while value.len() > 1 {
-			value.pop();
-		}
-
-		value
-	}
-
-	fn one_request(mut value: Vec<BlockRequestsDetail>) -> Vec<BlockRequestsDetail> {
-		while value.len() > 1 {
-			value.pop();
-		}
-
-		value
 	}
 }

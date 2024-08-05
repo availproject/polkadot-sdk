@@ -251,17 +251,17 @@ pub(crate) async fn import_single_block_metered_v2<B: BlockT, V: Verifier<B>>(
 	let start_timestamp = BlockMetrics::get_current_timestamp_in_ms_or_default();
 	let res =
 		import_single_block_metered(import_handle, block_origin, block, verifier, metrics).await;
-	dbg!(&res);
 	let end_timestamp = BlockMetrics::get_current_timestamp_in_ms_or_default();
 
-	let interval = IntervalWithBlockInformation {
-		kind: IntervalKind::Import,
-		block_number,
-		block_hash,
-		start_timestamp,
-		end_timestamp,
+	match &res {
+		Ok(BlockImportStatus::ImportedUnknown(_, _, peer_id)) => {
+			dbg!(peer_id);
+			let peer_id = peer_id.clone();
+			let value = IntervalDetailsImport { peer_id, start_timestamp, end_timestamp };
+			BlockMetrics::observe_interval(block_number, block_hash, value.into());
+		},
+		_ => (),
 	};
-	BlockMetrics::observe_interval(interval);
 
 	res
 }
