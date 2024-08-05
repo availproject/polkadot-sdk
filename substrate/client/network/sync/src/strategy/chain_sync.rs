@@ -1090,6 +1090,8 @@ where
 		peer_id: PeerId,
 		announce: &BlockAnnounce<B::Header>,
 	) -> Option<(B::Hash, NumberFor<B>)> {
+		println!("on_validated_block_announce !!!!");
+
 		let number = *announce.header.number();
 		let hash = announce.header.hash();
 		let parent_status =
@@ -1151,6 +1153,7 @@ where
 			return peer_info;
 		}
 
+		dbg!(self.status().state);
 		if self.status().state == SyncState::Idle {
 			trace!(
 				target: LOG_TARGET,
