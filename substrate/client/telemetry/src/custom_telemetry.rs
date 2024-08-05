@@ -136,7 +136,11 @@ impl BlockMetrics {
 		}
 	}
 
+	///
 	pub fn observe_interval(block_number: u64, block_hash: String, value: IntervalDetails) {
+		println!("Observing new Interval. BlockNumber={}, BlockHash={}", block_number, block_hash);
+		dbg!(&value);
+
 		let Ok(mut lock) = BLOCK_METRICS.lock() else {
 			return;
 		};
