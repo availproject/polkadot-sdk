@@ -302,10 +302,10 @@ pub mod external {
 	pub fn prepare_data(
 		value: Option<HashMap<u64, HashMap<String, BlockIntervals>>>,
 	) -> Vec<BlockIntervalFromNode> {
+		dbg!(&value);
 		let Some(block_heights) = value else {
 			return Vec::new();
 		};
-		dbg!(&value);
 
 		let mut processed_blocks: Vec<BlockIntervalFromNode> = Vec::new();
 
