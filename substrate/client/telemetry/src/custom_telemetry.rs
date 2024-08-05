@@ -32,19 +32,26 @@ pub enum IntervalKind {
 	Import = 2,
 }
 
+///
 #[derive(Debug, Clone, Default)]
 pub struct BlockIntervals {
 	proposal: Option<IntervalDetailsProposal>,
 	import: Option<IntervalDetailsImport>,
-	syncs: Vec<IntervalDetailsSync>,
+	sync: Option<IntervalDetailsSync>,
+	partial_syncs: Vec<IntervalDetailsPartialSync>,
 }
 
 ///
 #[derive(Debug, Clone)]
 pub enum IntervalDetails {
+	///
 	Proposal(IntervalDetailsProposal),
+	///
 	Import(IntervalDetailsImport),
+	///
 	Sync(IntervalDetailsSync),
+	///
+	PartialSync(IntervalDetailsPartialSync),
 }
 
 impl From<IntervalDetailsProposal> for IntervalDetails {
@@ -85,9 +92,19 @@ pub struct IntervalDetailsImport {
 	pub end_timestamp: u64,
 }
 
-///
 #[derive(Debug, Clone)]
 pub struct IntervalDetailsSync {
+	///
+	pub peer_id: PeerId,
+	///
+	pub start_timestamp: u64,
+	///
+	pub end_timestamp: u64,
+}
+
+///
+#[derive(Debug, Clone)]
+pub struct IntervalDetailsPartialSync {
 	///
 	pub peer_id: PeerId,
 	///
@@ -168,21 +185,41 @@ impl BlockMetrics {
 				}
 				block.import = Some(v);
 			},
-			IntervalDetails::Sync(v) => {
-				if let Some(details) = block.syncs.iter_mut().find(|b| b.peer_id == v.peer_id) {
-					if v.start_timestamp.is_some() {
-						details.start_timestamp = v.start_timestamp;
-					}
-					if v.end_timestamp.is_some() {
-						details.end_timestamp = v.end_timestamp;
-					}
-				} else {
-					if block.syncs.len() >= MAX_SYNCS_PER_BLOCK {
+			IntervalDetails::PartialSync(v) => {
+				// If we already have sync that is paired with import, then don't do anything.
+				if let (Some(import), Some(sync)) = (&block.import, &block.sync) {
+					if import.peer_id == Some(sync.peer_id) {
 						return;
 					}
-					block.syncs.push(v);
+				}
+
+				if let Some(p_sync) =
+					block.partial_syncs.iter_mut().find(|s| s.peer_id == v.peer_id)
+				{
+					p_sync.start_timestamp = match v.start_timestamp {
+						Some(s) => Some(s),
+						_ => p_sync.start_timestamp,
+					};
+
+					p_sync.end_timestamp = match v.end_timestamp {
+						Some(s) => Some(s),
+						_ => p_sync.end_timestamp,
+					};
+
+					if let (Some(start_timestamp), Some(end_timestamp)) =
+						(p_sync.start_timestamp, p_sync.end_timestamp)
+					{
+						block.sync = Some(IntervalDetailsSync {
+							peer_id: p_sync.peer_id,
+							start_timestamp,
+							end_timestamp,
+						});
+					}
+				} else {
+					block.partial_syncs.push(v);
 				}
 			},
+			_ => (),
 		};
 	}
 
@@ -235,7 +272,7 @@ pub mod external {
 	///
 	#[derive(Debug, Serialize, Clone)]
 	pub struct IntervalFromNode {
-		//
+		///
 		pub peer_id: Option<String>,
 		///
 		pub kind: IntervalKind,
@@ -268,22 +305,14 @@ pub mod external {
 		}
 	}
 
-	impl TryFrom<IntervalDetailsSync> for IntervalFromNode {
-		type Error = ();
-
-		fn try_from(value: IntervalDetailsSync) -> Result<Self, Self::Error> {
-			let (start_timestamp, end_timestamp) =
-				match (value.start_timestamp, value.end_timestamp) {
-					(Some(s), Some(e)) => (s, e),
-					_ => return Err(()),
-				};
-
-			Ok(Self {
+	impl From<IntervalDetailsSync> for IntervalFromNode {
+		fn from(value: IntervalDetailsSync) -> Self {
+			Self {
 				peer_id: Some(value.peer_id.to_string()),
-				kind: IntervalKind::Sync,
-				start_timestamp,
-				end_timestamp,
-			})
+				kind: IntervalKind::Import,
+				start_timestamp: value.start_timestamp,
+				end_timestamp: value.end_timestamp,
+			}
 		}
 	}
 
@@ -327,8 +356,10 @@ pub mod external {
 					block.intervals.push(interval.into())
 				}
 
-				let filtered_sync_data: Vec<IntervalFromNode> =
+				let mut filtered_sync_data: Vec<IntervalFromNode> =
 					data.syncs.into_iter().filter_map(|v| v.try_into().ok()).collect();
+
+				filtered_sync_data.sort_by(|a, b| a.end_timestamp.cmp(&b.end_timestamp));
 
 				if let Some(interval) = filtered_sync_data.iter().find(|i| i.peer_id == peer_id) {
 					block.intervals.push(interval.clone());

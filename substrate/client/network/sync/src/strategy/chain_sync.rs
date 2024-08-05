@@ -49,7 +49,7 @@ use sc_consensus::{BlockImportError, BlockImportStatus, IncomingBlock};
 use sc_network_common::sync::message::{
 	BlockAnnounce, BlockAttributes, BlockData, BlockRequest, BlockResponse, Direction, FromBlock,
 };
-use sc_telemetry::custom_telemetry::{BlockMetrics, IntervalDetailsSync, IntervalKind};
+use sc_telemetry::custom_telemetry::{BlockMetrics, IntervalDetailsSync};
 use sp_arithmetic::traits::Saturating;
 use sp_blockchain::{Error as ClientError, HeaderBackend, HeaderMetadata};
 use sp_consensus::{BlockOrigin, BlockStatus};
