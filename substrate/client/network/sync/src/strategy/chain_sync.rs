@@ -1140,11 +1140,21 @@ where
 
 		// known block case
 		if known || self.is_already_downloading(&hash) {
-			println!("Known Block: PeerID={:?}", peer_id.to_string());
 			trace!(target: LOG_TARGET, "Known block announce from {}: {}", peer_id, hash);
 			if let Some(target) = self.fork_targets.get_mut(&hash) {
 				target.peers.insert(peer_id);
 			}
+
+			let summary = announce.summary();
+			let now = BlockMetrics::get_current_timestamp_in_ms_or_default();
+			let value =
+				IntervalDetailsSync { peer_id, start_timestamp: Some(now), end_timestamp: None };
+			BlockMetrics::observe_interval(
+				summary.number.try_into().unwrap_or_default(),
+				std::format!("{:?}", summary.block_hash),
+				value.into(),
+			);
+
 			return peer_info;
 		}
 
@@ -1179,7 +1189,6 @@ where
 				.insert(peer_id);
 
 			let summary = announce.summary();
-
 			let now = BlockMetrics::get_current_timestamp_in_ms_or_default();
 			let value =
 				IntervalDetailsSync { peer_id, start_timestamp: Some(now), end_timestamp: None };
