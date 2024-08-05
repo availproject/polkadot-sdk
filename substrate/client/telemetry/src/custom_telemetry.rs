@@ -66,9 +66,9 @@ impl From<IntervalDetailsImport> for IntervalDetails {
 	}
 }
 
-impl From<IntervalDetailsSync> for IntervalDetails {
-	fn from(value: IntervalDetailsSync) -> Self {
-		Self::Sync(value)
+impl From<IntervalDetailsPartialSync> for IntervalDetails {
+	fn from(value: IntervalDetailsPartialSync) -> Self {
+		Self::PartialSync(value)
 	}
 }
 
@@ -92,6 +92,7 @@ pub struct IntervalDetailsImport {
 	pub end_timestamp: u64,
 }
 
+///
 #[derive(Debug, Clone)]
 pub struct IntervalDetailsSync {
 	///
@@ -124,7 +125,6 @@ pub struct BlockRequestsDetail {
 	pub time_frame: u64,
 }
 
-const MAX_SYNCS_PER_BLOCK: usize = 50;
 const MAX_BLOCKS_PER_HEIGHT: usize = 50;
 
 ///
@@ -350,23 +350,12 @@ pub mod external {
 					block.intervals.push(interval.into())
 				}
 
-				let mut peer_id: Option<String> = None;
 				if let Some(interval) = data.import {
-					peer_id = interval.peer_id.and_then(|p| Some(p.to_string()));
 					block.intervals.push(interval.into())
 				}
 
-				let mut filtered_sync_data: Vec<IntervalFromNode> =
-					data.syncs.into_iter().filter_map(|v| v.try_into().ok()).collect();
-
-				filtered_sync_data.sort_by(|a, b| a.end_timestamp.cmp(&b.end_timestamp));
-
-				if let Some(interval) = filtered_sync_data.iter().find(|i| i.peer_id == peer_id) {
-					block.intervals.push(interval.clone());
-				} else {
-					if let Some(interval) = filtered_sync_data.first() {
-						block.intervals.push(interval.clone());
-					}
+				if let Some(interval) = data.sync {
+					block.intervals.push(interval.into())
 				}
 
 				processed_blocks.push(block);

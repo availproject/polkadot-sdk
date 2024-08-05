@@ -49,7 +49,7 @@ use sc_consensus::{BlockImportError, BlockImportStatus, IncomingBlock};
 use sc_network_common::sync::message::{
 	BlockAnnounce, BlockAttributes, BlockData, BlockRequest, BlockResponse, Direction, FromBlock,
 };
-use sc_telemetry::custom_telemetry::{BlockMetrics, IntervalDetailsSync};
+use sc_telemetry::custom_telemetry::{BlockMetrics, IntervalDetailsPartialSync};
 use sp_arithmetic::traits::Saturating;
 use sp_blockchain::{Error as ClientError, HeaderBackend, HeaderMetadata};
 use sp_consensus::{BlockOrigin, BlockStatus};
@@ -708,7 +708,7 @@ where
 							let timestamp = BlockMetrics::get_current_timestamp_in_ms_or_default();
 							for block in &blocks {
 								if let Some(header) = &block.header {
-									let value = IntervalDetailsSync {
+									let value = IntervalDetailsPartialSync {
 										peer_id: peer_id.clone(),
 										start_timestamp: None,
 										end_timestamp: Some(timestamp),
@@ -784,7 +784,7 @@ where
 						let timestamp = BlockMetrics::get_current_timestamp_in_ms_or_default();
 						for block in &blocks {
 							if let Some(header) = &block.header {
-								let value = IntervalDetailsSync {
+								let value = IntervalDetailsPartialSync {
 									peer_id: peer_id.clone(),
 									start_timestamp: None,
 									end_timestamp: Some(timestamp),
@@ -1147,8 +1147,11 @@ where
 
 			let summary = announce.summary();
 			let now = BlockMetrics::get_current_timestamp_in_ms_or_default();
-			let value =
-				IntervalDetailsSync { peer_id, start_timestamp: Some(now), end_timestamp: None };
+			let value = IntervalDetailsPartialSync {
+				peer_id,
+				start_timestamp: Some(now),
+				end_timestamp: None,
+			};
 			BlockMetrics::observe_interval(
 				summary.number.try_into().unwrap_or_default(),
 				std::format!("{:?}", summary.block_hash),
@@ -1190,8 +1193,11 @@ where
 
 			let summary = announce.summary();
 			let now = BlockMetrics::get_current_timestamp_in_ms_or_default();
-			let value =
-				IntervalDetailsSync { peer_id, start_timestamp: Some(now), end_timestamp: None };
+			let value = IntervalDetailsPartialSync {
+				peer_id,
+				start_timestamp: Some(now),
+				end_timestamp: None,
+			};
 			BlockMetrics::observe_interval(
 				summary.number.try_into().unwrap_or_default(),
 				std::format!("{:?}", summary.block_hash),
