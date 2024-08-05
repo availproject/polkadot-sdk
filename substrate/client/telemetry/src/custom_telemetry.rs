@@ -183,14 +183,27 @@ impl BlockMetrics {
 				if block.import.is_some() {
 					return;
 				}
+				let peer_id = v.peer_id.clone();
 				block.import = Some(v);
+
+				if let Some(sync) =
+					block.partial_syncs.iter().find(|ps| Some(ps.peer_id) == peer_id)
+				{
+					if let (Some(start_timestamp), Some(end_timestamp)) =
+						(sync.start_timestamp, sync.end_timestamp)
+					{
+						block.sync = Some(IntervalDetailsSync {
+							peer_id: sync.peer_id,
+							start_timestamp,
+							end_timestamp,
+						})
+					}
+				}
 			},
 			IntervalDetails::PartialSync(v) => {
 				// If we already have sync that is paired with import, then don't do anything.
-				if let (Some(import), Some(sync)) = (&block.import, &block.sync) {
-					if import.peer_id == Some(sync.peer_id) {
-						return;
-					}
+				if block.sync.is_some() {
+					return;
 				}
 
 				if let Some(p_sync) =
@@ -205,16 +218,6 @@ impl BlockMetrics {
 						Some(s) => Some(s),
 						_ => p_sync.end_timestamp,
 					};
-
-					if let (Some(start_timestamp), Some(end_timestamp)) =
-						(p_sync.start_timestamp, p_sync.end_timestamp)
-					{
-						block.sync = Some(IntervalDetailsSync {
-							peer_id: p_sync.peer_id,
-							start_timestamp,
-							end_timestamp,
-						});
-					}
 				} else {
 					block.partial_syncs.push(v);
 				}
