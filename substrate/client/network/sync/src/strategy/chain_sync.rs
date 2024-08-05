@@ -1090,10 +1090,15 @@ where
 		peer_id: PeerId,
 		announce: &BlockAnnounce<B::Header>,
 	) -> Option<(B::Hash, NumberFor<B>)> {
-		println!("on_validated_block_announce !!!!");
-
 		let number = *announce.header.number();
 		let hash = announce.header.hash();
+		println!(
+			"on_validated_block_announce. PeerID={}, BlockNumber={}, BlockHash={:?}",
+			peer_id.to_string(),
+			number,
+			hash
+		);
+
 		let parent_status =
 			self.block_status(announce.header.parent_hash()).unwrap_or(BlockStatus::Unknown);
 		let known_parent = parent_status != BlockStatus::Unknown;
