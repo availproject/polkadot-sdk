@@ -697,14 +697,9 @@ where
 					PeerSyncState::DownloadingNew(_) => {
 						self.blocks.clear_peer_download(peer_id);
 						peer.state = PeerSyncState::Available;
-						println!("DownloadingNew. PeerID={}", peer_id.to_string());
 						if let Some(start_block) =
 							validate_blocks::<B>(&blocks, peer_id, Some(request))?
 						{
-							println!(
-								"Validate Block Successful Now. PeerID={}",
-								peer_id.to_string()
-							);
 							let timestamp = BlockMetrics::get_current_timestamp_in_ms_or_default();
 							for block in &blocks {
 								if let Some(header) = &block.header {
@@ -780,7 +775,6 @@ where
 						}
 						validate_blocks::<B>(&blocks, peer_id, Some(request))?;
 
-						println!("Validate Block Successful Stale. PeerID={}", peer_id.to_string());
 						let timestamp = BlockMetrics::get_current_timestamp_in_ms_or_default();
 						for block in &blocks {
 							if let Some(header) = &block.header {
@@ -819,7 +813,6 @@ where
 							.collect()
 					},
 					PeerSyncState::AncestorSearch { current, start, state } => {
-						println!("AncestorSearch PeerID={}", peer_id.to_string());
 						let matching_hash = match (blocks.get(0), self.client.hash(*current)) {
 							(Some(block), Ok(maybe_our_block_hash)) => {
 								trace!(
@@ -934,7 +927,6 @@ where
 					| PeerSyncState::DownloadingState => Vec::new(),
 				}
 			} else {
-				println!("Else PeerID={}", peer_id.to_string());
 				// When request.is_none() this is a block announcement. Just accept blocks.
 				validate_blocks::<B>(&blocks, peer_id, None)?;
 				blocks
@@ -1092,12 +1084,6 @@ where
 	) -> Option<(B::Hash, NumberFor<B>)> {
 		let number = *announce.header.number();
 		let hash = announce.header.hash();
-		println!(
-			"on_validated_block_announce. PeerID={}, BlockNumber={}, BlockHash={:?}",
-			peer_id.to_string(),
-			number,
-			hash
-		);
 
 		let parent_status =
 			self.block_status(announce.header.parent_hash()).unwrap_or(BlockStatus::Unknown);
@@ -1172,7 +1158,6 @@ where
 			return peer_info;
 		}
 
-		dbg!(self.status().state);
 		if self.status().state == SyncState::Idle {
 			trace!(
 				target: LOG_TARGET,

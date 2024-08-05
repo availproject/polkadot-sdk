@@ -312,7 +312,7 @@ pub mod external {
 		fn from(value: IntervalDetailsSync) -> Self {
 			Self {
 				peer_id: Some(value.peer_id.to_string()),
-				kind: IntervalKind::Import,
+				kind: IntervalKind::Sync,
 				start_timestamp: value.start_timestamp,
 				end_timestamp: value.end_timestamp,
 			}
