@@ -687,6 +687,7 @@ where
 		let mut gap = false;
 		println!("PeerID={}", peer_id.to_string());
 		let new_blocks: Vec<IncomingBlock<B>> = if let Some(peer) = self.peers.get_mut(peer_id) {
+			println!("New blocks PeerID={}", peer_id.to_string());
 			let mut blocks = response.blocks;
 			if request.as_ref().map_or(false, |r| r.direction == Direction::Descending) {
 				trace!(target: LOG_TARGET, "Reversing incoming block list");
@@ -726,6 +727,7 @@ where
 						self.ready_blocks()
 					},
 					PeerSyncState::DownloadingGap(_) => {
+						println!("DownloadingGap PeerID={}", peer_id.to_string());
 						peer.state = PeerSyncState::Available;
 						if let Some(gap_sync) = &mut self.gap_sync {
 							gap_sync.blocks.clear_peer_download(peer_id);
@@ -773,6 +775,7 @@ where
 						}
 					},
 					PeerSyncState::DownloadingStale(_) => {
+						println!("DownloadingStale PeerID={}", peer_id.to_string());
 						peer.state = PeerSyncState::Available;
 						if blocks.is_empty() {
 							debug!(target: LOG_TARGET, "Empty block response from {peer_id}");
@@ -801,6 +804,7 @@ where
 							.collect()
 					},
 					PeerSyncState::AncestorSearch { current, start, state } => {
+						println!("AncestorSearch PeerID={}", peer_id.to_string());
 						let matching_hash = match (blocks.get(0), self.client.hash(*current)) {
 							(Some(block), Ok(maybe_our_block_hash)) => {
 								trace!(
@@ -915,6 +919,7 @@ where
 					| PeerSyncState::DownloadingState => Vec::new(),
 				}
 			} else {
+				println!("Else PeerID={}", peer_id.to_string());
 				// When request.is_none() this is a block announcement. Just accept blocks.
 				validate_blocks::<B>(&blocks, peer_id, None)?;
 				blocks
