@@ -255,7 +255,6 @@ pub(crate) async fn import_single_block_metered_v2<B: BlockT, V: Verifier<B>>(
 
 	match &res {
 		Ok(BlockImportStatus::ImportedUnknown(_, _, peer_id)) => {
-			dbg!(peer_id);
 			let peer_id = peer_id.clone();
 			let value = IntervalDetailsImport { peer_id, start_timestamp, end_timestamp };
 			BlockMetrics::observe_interval(block_number, block_hash, value.into());

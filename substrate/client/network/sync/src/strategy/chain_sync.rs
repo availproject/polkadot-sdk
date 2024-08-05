@@ -697,9 +697,11 @@ where
 					PeerSyncState::DownloadingNew(_) => {
 						self.blocks.clear_peer_download(peer_id);
 						peer.state = PeerSyncState::Available;
+						println!("DownloadingNew. PeerID={}", peer_id.to_string());
 						if let Some(start_block) =
 							validate_blocks::<B>(&blocks, peer_id, Some(request))?
 						{
+							println!("Validate Block Successful. PeerID={}", peer_id.to_string());
 							let timestamp = BlockMetrics::get_current_timestamp_in_ms_or_default();
 							for block in &blocks {
 								if let Some(header) = &block.header {
@@ -717,6 +719,8 @@ where
 							}
 							self.blocks.insert(start_block, blocks, *peer_id);
 						}
+
+						println!("Ready Blocks. PeerID={}", peer_id.to_string());
 
 						self.ready_blocks()
 					},
