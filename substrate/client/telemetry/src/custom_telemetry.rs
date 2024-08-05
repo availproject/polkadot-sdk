@@ -138,9 +138,6 @@ impl BlockMetrics {
 
 	///
 	pub fn observe_interval(block_number: u64, block_hash: String, value: IntervalDetails) {
-		println!("Observing new Interval. BlockNumber={}, BlockHash={}", block_number, block_hash);
-		dbg!(&value);
-
 		let Ok(mut lock) = BLOCK_METRICS.lock() else {
 			return;
 		};
@@ -264,7 +261,7 @@ pub mod external {
 			let peer_id = value.peer_id.and_then(|p| Some(p.to_string()));
 			Self {
 				peer_id,
-				kind: IntervalKind::Proposal,
+				kind: IntervalKind::Import,
 				start_timestamp: value.start_timestamp,
 				end_timestamp: value.end_timestamp,
 			}
@@ -305,11 +302,10 @@ pub mod external {
 	pub fn prepare_data(
 		value: Option<HashMap<u64, HashMap<String, BlockIntervals>>>,
 	) -> Vec<BlockIntervalFromNode> {
-		dbg!(&value);
-
 		let Some(block_heights) = value else {
 			return Vec::new();
 		};
+		dbg!(&value);
 
 		let mut processed_blocks: Vec<BlockIntervalFromNode> = Vec::new();
 
