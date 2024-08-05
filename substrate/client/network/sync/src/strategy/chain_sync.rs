@@ -685,9 +685,7 @@ where
 	) -> Result<(), BadPeer> {
 		self.downloaded_blocks += response.blocks.len();
 		let mut gap = false;
-		println!("PeerID={}", peer_id.to_string());
 		let new_blocks: Vec<IncomingBlock<B>> = if let Some(peer) = self.peers.get_mut(peer_id) {
-			println!("New blocks PeerID={}", peer_id.to_string());
 			let mut blocks = response.blocks;
 			if request.as_ref().map_or(false, |r| r.direction == Direction::Descending) {
 				trace!(target: LOG_TARGET, "Reversing incoming block list");
@@ -703,7 +701,10 @@ where
 						if let Some(start_block) =
 							validate_blocks::<B>(&blocks, peer_id, Some(request))?
 						{
-							println!("Validate Block Successful. PeerID={}", peer_id.to_string());
+							println!(
+								"Validate Block Successful Now. PeerID={}",
+								peer_id.to_string()
+							);
 							let timestamp = BlockMetrics::get_current_timestamp_in_ms_or_default();
 							for block in &blocks {
 								if let Some(header) = &block.header {
@@ -722,12 +723,9 @@ where
 							self.blocks.insert(start_block, blocks, *peer_id);
 						}
 
-						println!("Ready Blocks. PeerID={}", peer_id.to_string());
-
 						self.ready_blocks()
 					},
 					PeerSyncState::DownloadingGap(_) => {
-						println!("DownloadingGap PeerID={}", peer_id.to_string());
 						peer.state = PeerSyncState::Available;
 						if let Some(gap_sync) = &mut self.gap_sync {
 							gap_sync.blocks.clear_peer_download(peer_id);
@@ -775,13 +773,30 @@ where
 						}
 					},
 					PeerSyncState::DownloadingStale(_) => {
-						println!("DownloadingStale PeerID={}", peer_id.to_string());
 						peer.state = PeerSyncState::Available;
 						if blocks.is_empty() {
 							debug!(target: LOG_TARGET, "Empty block response from {peer_id}");
 							return Err(BadPeer(*peer_id, rep::NO_BLOCK));
 						}
 						validate_blocks::<B>(&blocks, peer_id, Some(request))?;
+
+						println!("Validate Block Successful Stale. PeerID={}", peer_id.to_string());
+						let timestamp = BlockMetrics::get_current_timestamp_in_ms_or_default();
+						for block in &blocks {
+							if let Some(header) = &block.header {
+								let value = IntervalDetailsSync {
+									peer_id: peer_id.clone(),
+									start_timestamp: None,
+									end_timestamp: Some(timestamp),
+								};
+								BlockMetrics::observe_interval(
+									header.number().clone().try_into().unwrap_or_default(),
+									std::format!("{:?}", header.hash()),
+									value.into(),
+								);
+							}
+						}
+
 						blocks
 							.into_iter()
 							.map(|b| {
