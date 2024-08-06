@@ -63,16 +63,18 @@ pub fn new_partial(config: &Configuration) -> Result<Service, ServiceError> {
 	});
 
 	let telemetry_handle = telemetry.as_ref().map(|t| t.handle());
-	let custom_telemetry_worker = CustomTelemetryWorker 
-	{ 
-		handle: telemetry_handle, 
+	let custom_telemetry_worker = CustomTelemetryWorker {
+		handle: telemetry_handle,
 		sampling_interval_ms: 6_000u128,
 		max_interval_buffer_size: 20,
 		max_block_request_buffer_size: 15,
+		is_authority: config.role.is_authority(),
 	};
-	task_manager
-		.spawn_handle()
-		.spawn("custom_telemetry", None, custom_telemetry_worker.run(None, None));
+	task_manager.spawn_handle().spawn(
+		"custom_telemetry",
+		None,
+		custom_telemetry_worker.run(None, None),
+	);
 
 	let select_chain = sc_consensus::LongestChain::new(backend.clone());
 
