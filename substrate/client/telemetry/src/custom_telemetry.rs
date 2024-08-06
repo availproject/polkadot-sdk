@@ -383,6 +383,10 @@ pub mod external {
 
 		for (block_number, forks) in block_heights {
 			for (block_hash, data) in forks {
+				if data.import.is_none() && data.proposal.is_none() && data.sync.is_none() {
+					continue;
+				}
+
 				let block = BlockIntervalFromNode {
 					block_number,
 					block_hash: block_hash.clone(),
