@@ -419,6 +419,7 @@ impl CustomTelemetryWorker {
 		filter_block_requests: Option<fn(Vec<BlockRequestsDetail>) -> Vec<BlockRequestsDetail>>,
 	) -> (Vec<BlockIntervalFromNode>, Vec<BlockRequestsDetail>) {
 		let metrics = BlockMetrics::take_metrics().unwrap_or_default();
+		dbg!(&metrics);
 
 		let block_intervals = external::prepare_data(metrics.intervals);
 		let block_intervals = match filter_intervals {
@@ -431,6 +432,8 @@ impl CustomTelemetryWorker {
 			Some(f) => f(block_requests),
 			_ => block_requests,
 		};
+
+		dbg!(&block_intervals);
 
 		(block_intervals, block_requests)
 	}
