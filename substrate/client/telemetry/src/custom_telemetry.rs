@@ -5,7 +5,7 @@
 //
 
 use std::{
-	collections::HashMap,
+	collections::BTreeMap,
 	sync::Mutex,
 	time::{Duration, SystemTimeError},
 };
@@ -115,7 +115,7 @@ pub struct IntervalDetailsPartialSync {
 }
 
 ///
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone)]
 pub struct BlockRequestsDetail {
 	///
 	pub current_queue_size: u32,
@@ -128,10 +128,10 @@ pub struct BlockRequestsDetail {
 const MAX_BLOCKS_PER_HEIGHT: usize = 50;
 
 ///
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct BlockMetrics {
 	///
-	intervals: Option<HashMap<u64, HashMap<String, BlockIntervals>>>,
+	intervals: Option<BTreeMap<u64, BTreeMap<String, BlockIntervals>>>,
 	///
 	block_requests: Vec<BlockRequestsDetail>,
 	///
@@ -154,13 +154,56 @@ impl BlockMetrics {
 	}
 
 	///
+	pub fn take_intervals(&mut self) -> Vec<(u64, BTreeMap<String, BlockIntervals>)> {
+		let Some(intervals) = &mut self.intervals else {
+			return Vec::new();
+		};
+
+		let mut data: Vec<(u64, BTreeMap<String, BlockIntervals>)> = Vec::new();
+
+		while let Some((_, blocks)) = intervals.first_key_value() {
+			if intervals.len() > 1 || Self::is_interval_ready(blocks) {
+				if let Some(interval) = intervals.pop_first() {
+					data.push(interval)
+				} else {
+					break;
+				}
+			} else {
+				break;
+			}
+		}
+
+		data
+	}
+
+	///
+	pub fn take_block_requests(&mut self) -> Vec<BlockRequestsDetail> {
+		std::mem::take(&mut self.block_requests)
+	}
+
+	fn is_interval_ready(blocks: &BTreeMap<String, BlockIntervals>) -> bool {
+		let mut done = true;
+		for (_, block) in blocks {
+			let count = block.proposal.is_some() as u32
+				+ block.import.is_some() as u32
+				+ block.sync.is_some() as u32;
+
+			if count < 2 {
+				done = false;
+			}
+		}
+
+		done
+	}
+
+	///
 	pub fn observe_interval(block_number: u64, block_hash: String, value: IntervalDetails) {
 		let Ok(mut lock) = BLOCK_METRICS.lock() else {
 			return;
 		};
 		let max_buffer_size = lock.max_interval_buffer_size;
 
-		let intervals = lock.intervals.get_or_insert(HashMap::new());
+		let intervals = lock.intervals.get_or_insert(BTreeMap::new());
 		if intervals.len() >= max_buffer_size {
 			return;
 		}
@@ -240,16 +283,16 @@ impl BlockMetrics {
 	}
 
 	///
-	pub fn take_metrics() -> Option<BlockMetrics> {
+	pub fn take_metrics(
+	) -> Option<(Vec<(u64, BTreeMap<String, BlockIntervals>)>, Vec<BlockRequestsDetail>)> {
 		let Ok(mut lock) = BLOCK_METRICS.lock() else {
 			return None;
 		};
 
-		let metrics = std::mem::take(&mut *lock);
-		lock.max_interval_buffer_size = metrics.max_interval_buffer_size;
-		lock.max_block_request_buffer_size = metrics.max_block_request_buffer_size;
+		let intervals = lock.take_intervals();
+		let block_requests = lock.take_block_requests();
 
-		Some(metrics)
+		Some((intervals, block_requests))
 	}
 
 	///
@@ -327,16 +370,15 @@ pub mod external {
 		pub import: Option<IntervalFromNode>,
 		///
 		pub sync: Option<IntervalFromNode>,
+		///
+		pub is_authority: bool,
 	}
 
 	///
 	pub fn prepare_data(
-		value: Option<HashMap<u64, HashMap<String, BlockIntervals>>>,
+		block_heights: Vec<(u64, BTreeMap<String, BlockIntervals>)>,
+		is_authority: bool,
 	) -> Vec<BlockIntervalFromNode> {
-		let Some(block_heights) = value else {
-			return Vec::new();
-		};
-
 		let mut processed_blocks: Vec<BlockIntervalFromNode> = Vec::new();
 
 		for (block_number, forks) in block_heights {
@@ -347,6 +389,7 @@ pub mod external {
 					proposal: data.proposal.and_then(|p| Some(p.into())),
 					import: data.import.and_then(|p| Some(p.into())),
 					sync: data.sync.and_then(|p| Some(p.into())),
+					is_authority,
 				};
 
 				processed_blocks.push(block);
@@ -367,6 +410,8 @@ pub struct CustomTelemetryWorker {
 	pub max_interval_buffer_size: usize,
 	///
 	pub max_block_request_buffer_size: usize,
+	///
+	pub is_authority: bool,
 }
 
 impl CustomTelemetryWorker {
@@ -401,7 +446,7 @@ impl CustomTelemetryWorker {
 		filter_block_requests: Option<fn(Vec<BlockRequestsDetail>) -> Vec<BlockRequestsDetail>>,
 	) {
 		let (block_intervals, block_requests) =
-			Self::get_and_filter_data(filter_intervals, filter_block_requests);
+			Self::get_and_filter_data(filter_intervals, filter_block_requests, self.is_authority);
 
 		if block_intervals.len() > 0 || block_requests.len() > 0 {
 			telemetry!(
@@ -417,17 +462,19 @@ impl CustomTelemetryWorker {
 	pub(crate) fn get_and_filter_data(
 		filter_intervals: Option<fn(Vec<BlockIntervalFromNode>) -> Vec<BlockIntervalFromNode>>,
 		filter_block_requests: Option<fn(Vec<BlockRequestsDetail>) -> Vec<BlockRequestsDetail>>,
+		is_authority: bool,
 	) -> (Vec<BlockIntervalFromNode>, Vec<BlockRequestsDetail>) {
-		let metrics = BlockMetrics::take_metrics().unwrap_or_default();
-		dbg!(&metrics);
+		let (intervals, block_requests) = BlockMetrics::take_metrics().unwrap_or_default();
+		dbg!(&intervals);
+		dbg!(&block_requests);
 
-		let block_intervals = external::prepare_data(metrics.intervals);
+		let block_intervals = external::prepare_data(intervals, is_authority);
 		let block_intervals = match filter_intervals {
 			Some(f) => f(block_intervals),
 			_ => block_intervals,
 		};
 
-		let block_requests = metrics.block_requests;
+		let block_requests = block_requests;
 		let block_requests = match filter_block_requests {
 			Some(f) => f(block_requests),
 			_ => block_requests,
