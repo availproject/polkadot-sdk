@@ -228,11 +228,6 @@ impl BlockMetrics {
 
 	///
 	pub fn observe_block_request(value: BlockRequestsDetail) {
-		println!(
-			"Observing Block Request. RH={:?}, CQS={:?}, TM={:?}",
-			value.requests_handled, value.current_queue_size, value.time_frame
-		);
-
 		let Ok(mut lock) = BLOCK_METRICS.lock() else {
 			return;
 		};
@@ -327,14 +322,17 @@ pub mod external {
 		///
 		pub block_hash: String,
 		///
-		pub intervals: Vec<IntervalFromNode>,
+		pub proposal: Option<IntervalFromNode>,
+		///
+		pub import: Option<IntervalFromNode>,
+		///
+		pub sync: Option<IntervalFromNode>,
 	}
 
 	///
 	pub fn prepare_data(
 		value: Option<HashMap<u64, HashMap<String, BlockIntervals>>>,
 	) -> Vec<BlockIntervalFromNode> {
-		dbg!(&value);
 		let Some(block_heights) = value else {
 			return Vec::new();
 		};
@@ -343,23 +341,13 @@ pub mod external {
 
 		for (block_number, forks) in block_heights {
 			for (block_hash, data) in forks {
-				let mut block = BlockIntervalFromNode {
+				let block = BlockIntervalFromNode {
 					block_number,
 					block_hash: block_hash.clone(),
-					intervals: Vec::new(),
+					proposal: data.proposal.and_then(|p| Some(p.into())),
+					import: data.import.and_then(|p| Some(p.into())),
+					sync: data.sync.and_then(|p| Some(p.into())),
 				};
-
-				if let Some(interval) = data.proposal {
-					block.intervals.push(interval.into())
-				}
-
-				if let Some(interval) = data.import {
-					block.intervals.push(interval.into())
-				}
-
-				if let Some(interval) = data.sync {
-					block.intervals.push(interval.into())
-				}
 
 				processed_blocks.push(block);
 			}
@@ -414,9 +402,6 @@ impl CustomTelemetryWorker {
 	) {
 		let (block_intervals, block_requests) =
 			Self::get_and_filter_data(filter_intervals, filter_block_requests);
-
-		dbg!(&block_intervals);
-		println!("Done");
 
 		if block_intervals.len() > 0 || block_requests.len() > 0 {
 			telemetry!(

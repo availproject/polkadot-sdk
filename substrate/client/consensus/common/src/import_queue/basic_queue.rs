@@ -400,8 +400,6 @@ async fn import_many_blocks<B: BlockT, V: Verifier<B>>(
 ) -> ImportManyBlocksResult<B> {
 	let count = blocks.len();
 
-	println!("Importing Many Blocks: Count: {:?}", count);
-
 	let blocks_range = match (
 		blocks.first().and_then(|b| b.header.as_ref().map(|h| h.number())),
 		blocks.last().and_then(|b| b.header.as_ref().map(|h| h.number())),
@@ -412,7 +410,6 @@ async fn import_many_blocks<B: BlockT, V: Verifier<B>>(
 	};
 
 	trace!(target: LOG_TARGET, "Starting import of {} blocks {}", count, blocks_range);
-	println!("Starting import of {} blocks {}", count, blocks_range);
 
 	let mut imported = 0;
 	let mut results = vec![];
