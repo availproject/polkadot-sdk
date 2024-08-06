@@ -370,14 +370,11 @@ pub mod external {
 		pub import: Option<IntervalFromNode>,
 		///
 		pub sync: Option<IntervalFromNode>,
-		///
-		pub is_authority: bool,
 	}
 
 	///
 	pub fn prepare_data(
 		block_heights: Vec<(u64, BTreeMap<String, BlockIntervals>)>,
-		is_authority: bool,
 	) -> Vec<BlockIntervalFromNode> {
 		let mut processed_blocks: Vec<BlockIntervalFromNode> = Vec::new();
 
@@ -393,7 +390,6 @@ pub mod external {
 					proposal: data.proposal.and_then(|p| Some(p.into())),
 					import: data.import.and_then(|p| Some(p.into())),
 					sync: data.sync.and_then(|p| Some(p.into())),
-					is_authority,
 				};
 
 				processed_blocks.push(block);
@@ -450,7 +446,7 @@ impl CustomTelemetryWorker {
 		filter_block_requests: Option<fn(Vec<BlockRequestsDetail>) -> Vec<BlockRequestsDetail>>,
 	) {
 		let (block_intervals, block_requests) =
-			Self::get_and_filter_data(filter_intervals, filter_block_requests, self.is_authority);
+			Self::get_and_filter_data(filter_intervals, filter_block_requests);
 
 		if block_intervals.len() > 0 || block_requests.len() > 0 {
 			telemetry!(
@@ -459,6 +455,7 @@ impl CustomTelemetryWorker {
 				"block.metrics";
 				"block_intervals" => block_intervals,
 				"block_requests" => block_requests,
+				"is_authority" => self.is_authority,
 			);
 		}
 	}
@@ -466,13 +463,12 @@ impl CustomTelemetryWorker {
 	pub(crate) fn get_and_filter_data(
 		filter_intervals: Option<fn(Vec<BlockIntervalFromNode>) -> Vec<BlockIntervalFromNode>>,
 		filter_block_requests: Option<fn(Vec<BlockRequestsDetail>) -> Vec<BlockRequestsDetail>>,
-		is_authority: bool,
 	) -> (Vec<BlockIntervalFromNode>, Vec<BlockRequestsDetail>) {
 		let (intervals, block_requests) = BlockMetrics::take_metrics().unwrap_or_default();
 		dbg!(&intervals);
 		dbg!(&block_requests);
 
-		let block_intervals = external::prepare_data(intervals, is_authority);
+		let block_intervals = external::prepare_data(intervals);
 		let block_intervals = match filter_intervals {
 			Some(f) => f(block_intervals),
 			_ => block_intervals,
