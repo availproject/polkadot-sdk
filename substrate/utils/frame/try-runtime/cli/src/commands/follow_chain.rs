@@ -105,7 +105,7 @@ where
 			ChainApi::<(), Block::Hash, Block::Header, SignedBlock<Block>>::block(&rpc, Some(hash))
 				.await
 				.or_else(|e| {
-					if matches!(e, substrate_rpc_client::Error::ParseError(_)) {
+					if matches!(e, substrate_rpc_client::ClientError::ParseError(_)) {
 						log::error!(
 							target: LOG_TARGET,
 							"failed to parse the block format of remote against the local \
