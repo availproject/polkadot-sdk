@@ -120,7 +120,7 @@ impl TryFrom<&[u8]> for Public {
 
 	fn try_from(data: &[u8]) -> Result<Self, Self::Error> {
 		if data.len() != Self::LEN {
-			return Err(())
+			return Err(());
 		}
 		let mut r = [0u8; Self::LEN];
 		r.copy_from_slice(data);
@@ -322,7 +322,7 @@ impl Signature {
 	/// you are certain that the array actually is a signature. GIGO!
 	pub fn from_slice(data: &[u8]) -> Option<Self> {
 		if data.len() != 64 {
-			return None
+			return None;
 		}
 		let mut r = [0u8; 64];
 		r.copy_from_slice(data);
@@ -423,7 +423,9 @@ impl TraitPair for Pair {
 	/// Returns true if the signature is good.
 	fn verify<M: AsRef<[u8]>>(sig: &Signature, message: M, public: &Public) -> bool {
 		let Ok(public) = VerificationKey::try_from(public.as_slice()) else { return false };
-		let Ok(signature) = ed25519_zebra::Signature::try_from(sig.as_ref()) else { return false };
+		let Ok(signature) = ed25519_zebra::Signature::try_from(sig.0.as_slice()) else {
+			return false;
+		};
 		public.verify(&signature, message.as_ref()).is_ok()
 	}
 
