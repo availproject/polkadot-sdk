@@ -86,7 +86,7 @@ use sp_runtime::{
 	traits::{AccountIdConversion, CheckedAdd, Saturating, StaticLookup, Zero},
 	Permill, RuntimeDebug,
 };
-use sp_std::{collections::btree_map::BTreeMap, prelude::*};
+use sp_std::{collections::btree_map::BTreeMap, marker::PhantomData, prelude::*};
 
 use frame_support::{
 	dispatch::{DispatchResult, DispatchResultWithPostInfo},
@@ -1118,5 +1118,17 @@ impl<T: Config<I>, I: 'static> OnUnbalanced<NegativeImbalanceOf<T, I>> for Palle
 		let _ = T::Currency::resolve_creating(&Self::account_id(), amount);
 
 		Self::deposit_event(Event::Deposit { value: numeric_amount });
+	}
+}
+
+/// TypedGet implementation to get the AccountId of the Treasury.
+pub struct TreasuryAccountId<R>(PhantomData<R>);
+impl<R> sp_runtime::traits::TypedGet for TreasuryAccountId<R>
+where
+	R: crate::Config,
+{
+	type Type = <R as frame_system::Config>::AccountId;
+	fn get() -> Self::Type {
+		crate::Pallet::<R>::account_id()
 	}
 }
