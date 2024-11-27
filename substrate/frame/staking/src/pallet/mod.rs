@@ -50,7 +50,7 @@ use crate::{
 	slashing, weights::WeightInfo, AccountIdLookupOf, ActiveEraInfo, BalanceOf, EraPayout,
 	EraRewardPoints, Exposure, ExposurePage, Forcing, MaxNominationsOf, NegativeImbalanceOf,
 	Nominations, NominationsQuota, PositiveImbalanceOf, RewardDestination, SessionInterface,
-	StakingLedger, UnappliedSlash, UnlockChunk, ValidatorPrefs,
+	StakingLedger, traits::FusionExt, UnappliedSlash, UnlockChunk, ValidatorPrefs,
 };
 
 // The speculative number of spans are used as an input of the weight annotation of
@@ -61,6 +61,7 @@ pub(crate) const SPECULATIVE_NUM_SPANS: u32 = 32;
 #[frame_support::pallet]
 pub mod pallet {
 	use frame_election_provider_support::ElectionDataProvider;
+	// use pallet_fusion::FusionExt;
 
 	use crate::{BenchmarkingConfig, PagedExposureMetadata};
 
@@ -283,6 +284,9 @@ pub mod pallet {
 
 		/// Weight information for extrinsics in this pallet.
 		type WeightInfo: WeightInfo;
+
+		/// Fusion pallet trait
+		type FusionExt: FusionExt<Self::AccountId, BalanceOf<Self>, u32>;
 	}
 
 	/// The ideal number of active validators.
@@ -1533,9 +1537,16 @@ pub mod pallet {
 			let last_item = slash_indices[slash_indices.len() - 1];
 			ensure!((last_item as usize) < unapplied.len(), Error::<T>::InvalidSlashIndex);
 
+			// FUSION CHANGE
+			let mut removed_slash_validators = Vec::new();
 			for (removed, index) in slash_indices.into_iter().enumerate() {
 				let index = (index as usize) - removed;
-				unapplied.remove(index);
+				let removed_element = unapplied.remove(index);
+				removed_slash_validators.push(removed_element.validator);
+			}
+
+			if !removed_slash_validators.is_empty() {
+				T::FusionExt::cancel_fusion_slash(era, &removed_slash_validators);
 			}
 
 			UnappliedSlashes::<T>::insert(&era, &unapplied);

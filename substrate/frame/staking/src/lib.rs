@@ -294,6 +294,7 @@ pub mod inflation;
 pub mod ledger;
 pub mod migrations;
 pub mod slashing;
+pub mod traits;
 pub mod weights;
 
 mod pallet;
