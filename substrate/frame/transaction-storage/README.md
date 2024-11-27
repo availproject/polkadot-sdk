@@ -79,8 +79,13 @@ ipfs block get /ipfs/<CID> > kitten.jpeg
 ```
 
 To renew data and prevent it from being disposed after the storage period, use `transactionStorage.renew(block, index)`
-where `block` is the block number of the previous store or renew transction, and index is the index of that transaction
+where `block` is the block number of the previous store or renew transaction, and index is the index of that transaction
 in the block.
 
 
 License: Apache-2.0
+
+
+## Release
+
+Polkadot SDK stable2409

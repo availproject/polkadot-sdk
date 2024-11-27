@@ -21,16 +21,16 @@
 use std::{
 	fs,
 	io::{self, Write},
-	net::SocketAddr,
 	path::PathBuf,
 	sync::Arc,
 };
 
 use codec::Encode;
 use sc_chain_spec::ChainSpec;
+use sc_cli::RpcEndpoint;
 use sc_client_api::HeaderBackend;
 use sc_service::{
-	config::{PrometheusConfig, TelemetryEndpoints},
+	config::{PrometheusConfig, RpcBatchRequestConfig, TelemetryEndpoints},
 	BasePath, TransactionPoolOptions,
 };
 use sp_core::hexdisplay::HexDisplay;
@@ -423,7 +423,7 @@ impl sc_cli::CliConfiguration for NormalizedRunCmd {
 		self.base.rpc_cors(is_dev)
 	}
 
-	fn rpc_addr(&self, default_listen_port: u16) -> sc_cli::Result<Option<SocketAddr>> {
+	fn rpc_addr(&self, default_listen_port: u16) -> sc_cli::Result<Option<Vec<RpcEndpoint>>> {
 		self.base.rpc_addr(default_listen_port)
 	}
 
@@ -441,6 +441,14 @@ impl sc_cli::CliConfiguration for NormalizedRunCmd {
 
 	fn rpc_max_subscriptions_per_connection(&self) -> sc_cli::Result<u32> {
 		Ok(self.base.rpc_max_subscriptions_per_connection)
+	}
+
+	fn rpc_buffer_capacity_per_connection(&self) -> sc_cli::Result<u32> {
+		Ok(self.base.rpc_message_buffer_capacity_per_connection)
+	}
+
+	fn rpc_batch_config(&self) -> sc_cli::Result<RpcBatchRequestConfig> {
+		self.base.rpc_batch_config()
 	}
 
 	fn transaction_pool(&self, is_dev: bool) -> sc_cli::Result<TransactionPoolOptions> {
