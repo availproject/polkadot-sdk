@@ -33,7 +33,6 @@ use sp_runtime::{
 	Perbill, Percent, Saturating,
 };
 use sp_staking::{currency_to_vote::CurrencyToVote, SessionIndex};
-use sp_std::prelude::*;
 
 pub use frame_benchmarking::v1::{
 	account, benchmarks, impl_benchmark_test_suite, whitelist_account, whitelisted_caller,
@@ -169,7 +168,7 @@ impl<T: Config> ListScenario<T> {
 
 		// burn the entire issuance.
 		let i = T::Currency::burn(T::Currency::total_issuance());
-		sp_std::mem::forget(i);
+		core::mem::forget(i);
 
 		// create accounts with the origin weight
 
@@ -855,7 +854,8 @@ benchmarks! {
 		ConfigOp::Set(u32::MAX),
 		ConfigOp::Set(u32::MAX),
 		ConfigOp::Set(Percent::max_value()),
-		ConfigOp::Set(Perbill::max_value())
+		ConfigOp::Set(Perbill::max_value()),
+		ConfigOp::Set(Percent::max_value())
 	) verify {
 		assert_eq!(MinNominatorBond::<T>::get(), BalanceOf::<T>::max_value());
 		assert_eq!(MinValidatorBond::<T>::get(), BalanceOf::<T>::max_value());
@@ -863,11 +863,13 @@ benchmarks! {
 		assert_eq!(MaxValidatorsCount::<T>::get(), Some(u32::MAX));
 		assert_eq!(ChillThreshold::<T>::get(), Some(Percent::from_percent(100)));
 		assert_eq!(MinCommission::<T>::get(), Perbill::from_percent(100));
+		assert_eq!(MaxStakedRewards::<T>::get(), Some(Percent::from_percent(100)));
 	}
 
 	set_staking_configs_all_remove {
 	}: set_staking_configs(
 		RawOrigin::Root,
+		ConfigOp::Remove,
 		ConfigOp::Remove,
 		ConfigOp::Remove,
 		ConfigOp::Remove,
@@ -881,6 +883,7 @@ benchmarks! {
 		assert!(!MaxValidatorsCount::<T>::exists());
 		assert!(!ChillThreshold::<T>::exists());
 		assert!(!MinCommission::<T>::exists());
+		assert!(!MaxStakedRewards::<T>::exists());
 	}
 
 	chill_other {
@@ -904,6 +907,7 @@ benchmarks! {
 			ConfigOp::Set(0),
 			ConfigOp::Set(Percent::from_percent(0)),
 			ConfigOp::Set(Zero::zero()),
+			ConfigOp::Noop,
 		)?;
 
 		let caller = whitelisted_caller();
@@ -946,6 +950,15 @@ benchmarks! {
 	}: _(RawOrigin::Root, min_commission)
 	verify {
 		assert_eq!(MinCommission::<T>::get(), Perbill::from_percent(100));
+	}
+
+	restore_ledger {
+		let (stash, controller) = create_stash_controller::<T>(0, 100, RewardDestination::Staked)?;
+		// corrupt ledger.
+		Ledger::<T>::remove(controller);
+	}: _(RawOrigin::Root, stash.clone(), None, None, None)
+	verify {
+		assert_eq!(Staking::<T>::inspect_bond_state(&stash), Ok(LedgerIntegrityState::Ok));
 	}
 
 	impl_benchmark_test_suite!(
@@ -1063,15 +1076,13 @@ mod tests {
 				(frame_benchmarking::BenchmarkParameter::v, v),
 				(frame_benchmarking::BenchmarkParameter::n, n),
 			];
-			let closure_to_benchmark =
-				<SelectedBenchmark as frame_benchmarking::BenchmarkingSetup<Test>>::instance(
+
+			assert_ok!(
+				<SelectedBenchmark as frame_benchmarking::BenchmarkingSetup<Test>>::unit_test_instance(
 					&selected_benchmark,
 					&c,
-					true,
 				)
-				.unwrap();
-
-			assert_ok!(closure_to_benchmark());
+			);
 		});
 	}
 }

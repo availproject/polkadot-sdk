@@ -906,7 +906,7 @@ async fn allows_reimporting_change_blocks() {
 	let mut net = GrandpaTestNet::new(api.clone(), 3, 0);
 
 	let client = net.peer(0).client().clone();
-	let (mut block_import, ..) = net.make_block_import(client.clone());
+	let (block_import, ..) = net.make_block_import(client.clone());
 
 	let full_client = client.as_client();
 	let mut builder = BlockBuilderBuilder::new(&*full_client)
@@ -954,7 +954,7 @@ async fn test_bad_justification() {
 	let mut net = GrandpaTestNet::new(api.clone(), 3, 0);
 
 	let client = net.peer(0).client().clone();
-	let (mut block_import, ..) = net.make_block_import(client.clone());
+	let (block_import, ..) = net.make_block_import(client.clone());
 
 	let full_client = client.as_client();
 	let mut builder = BlockBuilderBuilder::new(&*full_client)
@@ -1805,7 +1805,7 @@ async fn grandpa_environment_checks_if_best_block_is_descendent_of_finality_targ
 	);
 
 	// best block is higher than finality target and it's on the same fork,
-	// the best block passed to the voting rule should not be overriden
+	// the best block passed to the voting rule should not be overridden
 	select_chain.set_best_chain(client.expect_header(hashof10_a).unwrap());
 	select_chain.set_finality_target(client.expect_header(hashof5_a).unwrap().hash());
 	voting_rule.set_expected_best_block(hashof10_a);
@@ -2050,7 +2050,7 @@ async fn justification_with_equivocation() {
 			precommits.push(precommit);
 		}
 
-		// we create an equivocation for the 67th validator targetting blocks #1 and #2.
+		// we create an equivocation for the 67th validator targeting blocks #1 and #2.
 		// this should be accounted as "voting for all blocks" and therefore block #3 will
 		// have 67/100 votes, reaching finality threshold.
 		{
@@ -2083,7 +2083,7 @@ async fn imports_justification_for_regular_blocks_on_import() {
 	let mut net = GrandpaTestNet::new(api.clone(), 1, 0);
 
 	let client = net.peer(0).client().clone();
-	let (mut block_import, ..) = net.make_block_import(client.clone());
+	let (block_import, ..) = net.make_block_import(client.clone());
 	let full_client = client.as_client();
 
 	// create a new block (without importing it)
@@ -2122,7 +2122,7 @@ async fn imports_justification_for_regular_blocks_on_import() {
 		GrandpaJustification::from_commit(&full_client, round, commit).unwrap()
 	};
 
-	let mut generate_and_import_block_with_justification = |parent| {
+	let generate_and_import_block_with_justification = |parent| {
 		// we import the block with justification attached
 		let block = generate_block(parent);
 		let block_hash = block.hash();

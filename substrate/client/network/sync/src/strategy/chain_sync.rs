@@ -30,9 +30,10 @@
 
 use crate::{
 	blocks::BlockCollection,
-	extra_requests::ExtraRequests,
+	justification_requests::ExtraRequests,
 	schema::v1::StateResponse,
 	strategy::{
+		disconnected_peers::DisconnectedPeers,
 		state_sync::{ImportResult, StateSync, StateSyncProvider},
 		warp::{WarpSyncPhase, WarpSyncProgress},
 	},
@@ -41,15 +42,15 @@ use crate::{
 };
 
 use codec::Encode;
-use libp2p::PeerId;
 use log::{debug, error, info, trace, warn};
-use prometheus_endpoint::{register, Gauge, GaugeVec, Opts, PrometheusError, Registry, U64};
+use prometheus_endpoint::{register, Gauge, PrometheusError, Registry, U64};
 use sc_client_api::{BlockBackend, ProofProvider};
 use sc_consensus::{BlockImportError, BlockImportStatus, IncomingBlock};
 use sc_network_common::sync::message::{
 	BlockAnnounce, BlockAttributes, BlockData, BlockRequest, BlockResponse, Direction, FromBlock,
 };
 use sc_telemetry::custom_telemetry::{BlockMetrics, IntervalDetailsPartialSync};
+use sc_network_types::PeerId;
 use sp_arithmetic::traits::Saturating;
 use sp_blockchain::{Error as ClientError, HeaderBackend, HeaderMetadata};
 use sp_consensus::{BlockOrigin, BlockStatus};
@@ -118,7 +119,7 @@ mod rep {
 	/// Reputation change for peers which send us a block with bad justifications.
 	pub const BAD_JUSTIFICATION: Rep = Rep::new(-(1 << 16), "Bad justification");
 
-	/// Reputation change when a peer sent us invlid ancestry result.
+	/// Reputation change when a peer sent us invalid ancestry result.
 	pub const UNKNOWN_ANCESTOR: Rep = Rep::new(-(1 << 16), "DB Error");
 
 	/// Peer response data does not have requested bits.
@@ -128,7 +129,6 @@ mod rep {
 struct Metrics {
 	queued_blocks: Gauge<U64>,
 	fork_targets: Gauge<U64>,
-	justifications: GaugeVec<U64>,
 }
 
 impl Metrics {
@@ -141,16 +141,6 @@ impl Metrics {
 			},
 			fork_targets: {
 				let g = Gauge::new("substrate_sync_fork_targets", "Number of fork sync targets")?;
-				register(g, r)?
-			},
-			justifications: {
-				let g = GaugeVec::new(
-					Opts::new(
-						"substrate_sync_extra_justifications",
-						"Number of extra justifications requests",
-					),
-					&["status"],
-				)?;
 				register(g, r)?
 			},
 		})
@@ -213,10 +203,10 @@ struct GapSync<B: BlockT> {
 pub enum ChainSyncAction<B: BlockT> {
 	/// Send block request to peer. Always implies dropping a stale block request to the same peer.
 	SendBlockRequest { peer_id: PeerId, request: BlockRequest<B> },
-	/// Drop stale block request.
-	CancelBlockRequest { peer_id: PeerId },
 	/// Send state request to peer.
 	SendStateRequest { peer_id: PeerId, request: OpaqueStateRequest },
+	/// Drop stale request.
+	CancelRequest { peer_id: PeerId },
 	/// Peer misbehaved. Disconnect, report it and cancel the block request to it.
 	DropPeer(BadPeer),
 	/// Import blocks.
@@ -251,6 +241,7 @@ pub struct ChainSync<B: BlockT, Client> {
 	client: Arc<Client>,
 	/// The active peers that we are using to sync and their PeerSync status
 	peers: HashMap<PeerId, PeerSync<B>>,
+	disconnected_peers: DisconnectedPeers,
 	/// A `BlockCollection` of blocks that are being downloaded from peers
 	blocks: BlockCollection<B>,
 	/// The best block number in our queue of blocks to import
@@ -373,15 +364,17 @@ where
 		client: Arc<Client>,
 		max_parallel_downloads: u32,
 		max_blocks_per_request: u32,
-		metrics_registry: Option<Registry>,
+		metrics_registry: Option<&Registry>,
+		initial_peers: impl Iterator<Item = (PeerId, B::Hash, NumberFor<B>)>,
 	) -> Result<Self, ClientError> {
 		let mut sync = Self {
 			client,
 			peers: HashMap::new(),
+			disconnected_peers: DisconnectedPeers::new(),
 			blocks: BlockCollection::new(),
 			best_queued_hash: Default::default(),
 			best_queued_number: Zero::zero(),
-			extra_justifications: ExtraRequests::new("justification"),
+			extra_justifications: ExtraRequests::new("justification", metrics_registry),
 			mode,
 			queue_blocks: Default::default(),
 			fork_targets: Default::default(),
@@ -393,7 +386,7 @@ where
 			import_existing: false,
 			gap_sync: None,
 			actions: Vec::new(),
-			metrics: metrics_registry.and_then(|r| match Metrics::register(&r) {
+			metrics: metrics_registry.and_then(|r| match Metrics::register(r) {
 				Ok(metrics) => Some(metrics),
 				Err(err) => {
 					log::error!(
@@ -406,6 +399,10 @@ where
 		};
 
 		sync.reset_sync_start_point()?;
+		initial_peers.for_each(|(peer_id, best_hash, best_number)| {
+			sync.add_peer(peer_id, best_hash, best_number);
+		});
+
 		Ok(sync)
 	}
 
@@ -442,7 +439,6 @@ where
 			state: sync_state,
 			best_seen_block,
 			num_peers: self.peers.len() as u32,
-			num_connected_peers: 0u32,
 			queued_blocks: self.queue_blocks.len() as u32,
 			state_sync: self.state_sync.as_ref().map(|s| s.progress()),
 			warp_sync: warp_sync_progress,
@@ -670,7 +666,13 @@ where
 
 		self.fork_targets
 			.entry(*hash)
-			.or_insert_with(|| ForkTarget { number, peers: Default::default(), parent_hash: None })
+			.or_insert_with(|| {
+				if let Some(metrics) = &self.metrics {
+					metrics.fork_targets.inc();
+				}
+
+				ForkTarget { number, peers: Default::default(), parent_hash: None }
+			})
 			.peers
 			.extend(peers);
 	}
@@ -704,7 +706,7 @@ where
 							for block in &blocks {
 								if let Some(header) = &block.header {
 									let value = IntervalDetailsPartialSync {
-										peer_id: peer_id.clone(),
+										peer_id: peer_id.clone().into(),
 										start_timestamp: None,
 										end_timestamp: Some(timestamp),
 									};
@@ -779,7 +781,7 @@ where
 						for block in &blocks {
 							if let Some(header) = &block.header {
 								let value = IntervalDetailsPartialSync {
-									peer_id: peer_id.clone(),
+									peer_id: peer_id.clone().into(),
 									start_timestamp: None,
 									end_timestamp: Some(timestamp),
 								};
@@ -910,10 +912,16 @@ where
 								);
 								self.fork_targets
 									.entry(peer.best_hash)
-									.or_insert_with(|| ForkTarget {
-										number: peer.best_number,
-										parent_hash: None,
-										peers: Default::default(),
+									.or_insert_with(|| {
+										if let Some(metrics) = &self.metrics {
+											metrics.fork_targets.inc();
+										}
+
+										ForkTarget {
+											number: peer.best_number,
+											parent_hash: None,
+											peers: Default::default(),
+										}
 									})
 									.peers
 									.insert(*peer_id);
@@ -1094,8 +1102,8 @@ where
 		let peer = if let Some(peer) = self.peers.get_mut(&peer_id) {
 			peer
 		} else {
-			error!(target: LOG_TARGET, "💔 Called `on_validated_block_announce` with a bad peer ID");
-			return Some((hash, number));
+			error!(target: LOG_TARGET, "💔 Called `on_validated_block_announce` with a bad peer ID {peer_id}");
+			return Some((hash, number))
 		};
 
 		if let PeerSyncState::AncestorSearch { .. } = peer.state {
@@ -1134,7 +1142,7 @@ where
 			let summary = announce.summary();
 			let now = BlockMetrics::get_current_timestamp_in_ms_or_default();
 			let value = IntervalDetailsPartialSync {
-				peer_id,
+				peer_id: peer_id.into(),
 				start_timestamp: Some(now),
 				end_timestamp: None,
 			};
@@ -1168,10 +1176,16 @@ where
 			);
 			self.fork_targets
 				.entry(hash)
-				.or_insert_with(|| ForkTarget {
-					number,
-					parent_hash: Some(*announce.header.parent_hash()),
-					peers: Default::default(),
+				.or_insert_with(|| {
+					if let Some(metrics) = &self.metrics {
+						metrics.fork_targets.inc();
+					}
+
+					ForkTarget {
+						number,
+						parent_hash: Some(*announce.header.parent_hash()),
+						peers: Default::default(),
+					}
 				})
 				.peers
 				.insert(peer_id);
@@ -1179,7 +1193,7 @@ where
 			let summary = announce.summary();
 			let now = BlockMetrics::get_current_timestamp_in_ms_or_default();
 			let value = IntervalDetailsPartialSync {
-				peer_id,
+				peer_id: peer_id.into(),
 				start_timestamp: Some(now),
 				end_timestamp: None,
 			};
@@ -1199,48 +1213,31 @@ where
 		if let Some(gap_sync) = &mut self.gap_sync {
 			gap_sync.blocks.clear_peer_download(peer_id)
 		}
-		self.peers.remove(peer_id);
+
+		if let Some(state) = self.peers.remove(peer_id) {
+			if !state.state.is_available() {
+				if let Some(bad_peer) =
+					self.disconnected_peers.on_disconnect_during_request(*peer_id)
+				{
+					self.actions.push(ChainSyncAction::DropPeer(bad_peer));
+				}
+			}
+		}
+
 		self.extra_justifications.peer_disconnected(peer_id);
 		self.allowed_requests.set_all();
 		self.fork_targets.retain(|_, target| {
 			target.peers.remove(peer_id);
 			!target.peers.is_empty()
 		});
+		if let Some(metrics) = &self.metrics {
+			metrics.fork_targets.set(self.fork_targets.len().try_into().unwrap_or(u64::MAX));
+		}
 
 		let blocks = self.ready_blocks();
 
 		if !blocks.is_empty() {
 			self.validate_and_queue_blocks(blocks, false);
-		}
-	}
-
-	/// Report prometheus metrics.
-	pub fn report_metrics(&self) {
-		if let Some(metrics) = &self.metrics {
-			metrics
-				.fork_targets
-				.set(self.fork_targets.len().try_into().unwrap_or(std::u64::MAX));
-			metrics
-				.queued_blocks
-				.set(self.queue_blocks.len().try_into().unwrap_or(std::u64::MAX));
-
-			let justifications_metrics = self.extra_justifications.metrics();
-			metrics
-				.justifications
-				.with_label_values(&["pending"])
-				.set(justifications_metrics.pending_requests.into());
-			metrics
-				.justifications
-				.with_label_values(&["active"])
-				.set(justifications_metrics.active_requests.into());
-			metrics
-				.justifications
-				.with_label_values(&["failed"])
-				.set(justifications_metrics.failed_requests.into());
-			metrics
-				.justifications
-				.with_label_values(&["importing"])
-				.set(justifications_metrics.importing_requests.into());
 		}
 	}
 
@@ -1312,6 +1309,11 @@ where
 			self.on_block_queued(h, n)
 		}
 		self.queue_blocks.extend(new_blocks.iter().map(|b| b.hash));
+		if let Some(metrics) = &self.metrics {
+			metrics
+				.queued_blocks
+				.set(self.queue_blocks.len().try_into().unwrap_or(u64::MAX));
+		}
 
 		self.actions.push(ChainSyncAction::ImportBlocks { origin, blocks: new_blocks })
 	}
@@ -1328,6 +1330,9 @@ where
 	/// through all peers to update our view of their state as well.
 	fn on_block_queued(&mut self, hash: &B::Hash, number: NumberFor<B>) {
 		if self.fork_targets.remove(hash).is_some() {
+			if let Some(metrics) = &self.metrics {
+				metrics.fork_targets.dec();
+			}
 			trace!(target: LOG_TARGET, "Completed fork sync {hash:?}");
 		}
 		if let Some(gap_sync) = &mut self.gap_sync {
@@ -1378,34 +1383,35 @@ where
 		);
 		let old_peers = std::mem::take(&mut self.peers);
 
-		old_peers.into_iter().for_each(|(peer_id, mut p)| {
-			// peers that were downloading justifications
-			// should be kept in that state.
-			if let PeerSyncState::DownloadingJustification(_) = p.state {
-				// We make sure our commmon number is at least something we have.
-				trace!(
-					target: LOG_TARGET,
-					"Keeping peer {} after restart, updating common number from={} => to={} (our best).",
-					peer_id,
-					p.common_number,
-					self.best_queued_number,
-				);
-				p.common_number = self.best_queued_number;
-				self.peers.insert(peer_id, p);
-				return;
+		old_peers.into_iter().for_each(|(peer_id, mut peer_sync)| {
+			match peer_sync.state {
+				PeerSyncState::Available => {
+					self.add_peer(peer_id, peer_sync.best_hash, peer_sync.best_number);
+				},
+				PeerSyncState::AncestorSearch { .. } |
+				PeerSyncState::DownloadingNew(_) |
+				PeerSyncState::DownloadingStale(_) |
+				PeerSyncState::DownloadingGap(_) |
+				PeerSyncState::DownloadingState => {
+					// Cancel a request first, as `add_peer` may generate a new request.
+					self.actions.push(ChainSyncAction::CancelRequest { peer_id });
+					self.add_peer(peer_id, peer_sync.best_hash, peer_sync.best_number);
+				},
+				PeerSyncState::DownloadingJustification(_) => {
+					// Peers that were downloading justifications
+					// should be kept in that state.
+					// We make sure our common number is at least something we have.
+					trace!(
+						target: LOG_TARGET,
+						"Keeping peer {} after restart, updating common number from={} => to={} (our best).",
+						peer_id,
+						peer_sync.common_number,
+						self.best_queued_number,
+					);
+					peer_sync.common_number = self.best_queued_number;
+					self.peers.insert(peer_id, peer_sync);
+				},
 			}
-
-			// handle peers that were in other states.
-			let action = match self.add_peer_inner(peer_id, p.best_hash, p.best_number) {
-				// since the request is not a justification, remove it from pending responses
-				Ok(None) => ChainSyncAction::CancelBlockRequest { peer_id },
-				// update the request if the new one is available
-				Ok(Some(request)) => ChainSyncAction::SendBlockRequest { peer_id, request },
-				// this implies that we need to drop pending response from the peer
-				Err(bad_peer) => ChainSyncAction::DropPeer(bad_peer),
-			};
-
-			self.actions.push(action);
 		});
 	}
 
@@ -1596,16 +1602,21 @@ where
 			std::cmp::min(self.best_queued_number, self.client.info().finalized_number);
 		let best_queued = self.best_queued_number;
 		let client = &self.client;
-		let queue = &self.queue_blocks;
+		let queue_blocks = &self.queue_blocks;
 		let allowed_requests = self.allowed_requests.take();
 		let max_parallel = if is_major_syncing { 1 } else { self.max_parallel_downloads };
 		let max_blocks_per_request = self.max_blocks_per_request;
 		let gap_sync = &mut self.gap_sync;
+		let disconnected_peers = &mut self.disconnected_peers;
+		let metrics = self.metrics.as_ref();
 		self.peers
 			.iter_mut()
 			.filter_map(move |(&id, peer)| {
-				if !peer.state.is_available() || !allowed_requests.contains(&id) {
-					return None;
+				if !peer.state.is_available() ||
+					!allowed_requests.contains(&id) ||
+					!disconnected_peers.is_peer_available(&id)
+				{
+					return None
 				}
 
 				// If our best queued is more than `MAX_BLOCKS_TO_LOOK_BACKWARDS` blocks away from
@@ -1613,11 +1624,11 @@ where
 				// common number is smaller than the last finalized block number, we should do an
 				// ancestor search to find a better common block. If the queue is full we wait till
 				// all blocks are imported though.
-				if best_queued.saturating_sub(peer.common_number)
-					> MAX_BLOCKS_TO_LOOK_BACKWARDS.into()
-					&& best_queued < peer.best_number
-					&& peer.common_number < last_finalized
-					&& queue.len() <= MAJOR_SYNC_BLOCKS.into()
+				if best_queued.saturating_sub(peer.common_number) >
+					MAX_BLOCKS_TO_LOOK_BACKWARDS.into() &&
+					best_queued < peer.best_number &&
+					peer.common_number < last_finalized &&
+					queue_blocks.len() <= MAJOR_SYNC_BLOCKS.into()
 				{
 					trace!(
 						target: LOG_TARGET,
@@ -1660,13 +1671,14 @@ where
 					last_finalized,
 					attrs,
 					|hash| {
-						if queue.contains(hash) {
+						if queue_blocks.contains(hash) {
 							BlockStatus::Queued
 						} else {
 							client.block_status(*hash).unwrap_or(BlockStatus::Unknown)
 						}
 					},
 					max_blocks_per_request,
+					metrics,
 				) {
 					trace!(target: LOG_TARGET, "Downloading fork {hash:?} from {id}");
 					peer.state = PeerSyncState::DownloadingStale(hash);
@@ -1716,7 +1728,10 @@ where
 			}
 
 			for (id, peer) in self.peers.iter_mut() {
-				if peer.state.is_available() && peer.common_number >= sync.target_number() {
+				if peer.state.is_available() &&
+					peer.common_number >= sync.target_number() &&
+					self.disconnected_peers.is_peer_available(&id)
+				{
 					peer.state = PeerSyncState::DownloadingState;
 					let request = sync.next_request();
 					trace!(target: LOG_TARGET, "New StateRequest for {}: {:?}", id, request);
@@ -1804,7 +1819,11 @@ where
 
 		let mut has_error = false;
 		for (_, hash) in &results {
-			self.queue_blocks.remove(hash);
+			if self.queue_blocks.remove(hash) {
+				if let Some(metrics) = &self.metrics {
+					metrics.queued_blocks.dec();
+				}
+			}
 			self.blocks.clear_queued(hash);
 			if let Some(gap_sync) = &mut self.gap_sync {
 				gap_sync.blocks.clear_queued(hash);
@@ -2137,14 +2156,15 @@ fn peer_gap_block_request<B: BlockT>(
 /// Get pending fork sync targets for a peer.
 fn fork_sync_request<B: BlockT>(
 	id: &PeerId,
-	targets: &mut HashMap<B::Hash, ForkTarget<B>>,
+	fork_targets: &mut HashMap<B::Hash, ForkTarget<B>>,
 	best_num: NumberFor<B>,
 	finalized: NumberFor<B>,
 	attributes: BlockAttributes,
 	check_block: impl Fn(&B::Hash) -> BlockStatus,
 	max_blocks_per_request: u32,
+	metrics: Option<&Metrics>,
 ) -> Option<(B::Hash, BlockRequest<B>)> {
-	targets.retain(|hash, r| {
+	fork_targets.retain(|hash, r| {
 		if r.number <= finalized {
 			trace!(
 				target: LOG_TARGET,
@@ -2165,7 +2185,10 @@ fn fork_sync_request<B: BlockT>(
 		}
 		true
 	});
-	for (hash, r) in targets {
+	if let Some(metrics) = metrics {
+		metrics.fork_targets.set(fork_targets.len().try_into().unwrap_or(u64::MAX));
+	}
+	for (hash, r) in fork_targets {
 		if !r.peers.contains(&id) {
 			continue;
 		}

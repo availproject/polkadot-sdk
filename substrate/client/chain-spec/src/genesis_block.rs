@@ -18,13 +18,12 @@
 
 //! Tool for creating the genesis block.
 
-use std::{collections::hash_map::DefaultHasher, marker::PhantomData, sync::Arc};
-
+use std::{marker::PhantomData, sync::Arc};
 use sc_client_api::{backend::Backend, BlockImportOperation};
 use sc_executor::RuntimeVersionOf;
 use sp_core::storage::{well_known_keys, StateVersion, Storage};
 use sp_runtime::{
-	traits::{Block as BlockT, Hash as HashT, Header as HeaderT, Zero},
+	traits::{Block as BlockT, Hash as HashT, HashingFor, Header as HeaderT, Zero},
 	BuildStorage,
 };
 use codec::{Encode, Decode};
@@ -32,12 +31,13 @@ use codec::{Encode, Decode};
 const GENESIS_EXTRINSIC_KEY: &[u8] = b"extrinsics";
 
 /// Return the state version given the genesis storage and executor.
-pub fn resolve_state_version_from_wasm<E>(
+pub fn resolve_state_version_from_wasm<E, H>(
 	storage: &Storage,
 	executor: &E,
 ) -> sp_blockchain::Result<StateVersion>
 where
 	E: RuntimeVersionOf,
+	H: HashT,
 {
 	if let Some(wasm) = storage.top.get(well_known_keys::CODE) {
 		let mut ext = sp_state_machine::BasicExternalities::new_empty(); // just to read runtime version.
@@ -46,12 +46,7 @@ where
 		let runtime_code = sp_core::traits::RuntimeCode {
 			code_fetcher: &code_fetcher,
 			heap_pages: None,
-			hash: {
-				use std::hash::{Hash, Hasher};
-				let mut state = DefaultHasher::new();
-				wasm.hash(&mut state);
-				state.finish().to_le_bytes().to_vec()
-			},
+			hash: <H as HashT>::hash(wasm).encode(),
 		};
 		let runtime_version = RuntimeVersionOf::runtime_version(executor, &mut ext, &runtime_code)
 			.map_err(|e| sp_blockchain::Error::VersionInvalid(e.to_string()))?;
@@ -138,7 +133,7 @@ impl<Block: BlockT, B: Backend<Block>, E: RuntimeVersionOf> BuildGenesisBlock<Bl
 	fn build_genesis_block(self) -> sp_blockchain::Result<(Block, Self::BlockImportOperation)> {
 		let Self { genesis_storage, commit_genesis_state, backend, executor, _phantom } = self;
 
-		let genesis_state_version = resolve_state_version_from_wasm(&genesis_storage, &executor)?;
+		let genesis_state_version = resolve_state_version_from_wasm::<_, HashingFor<Block>>(&genesis_storage, &executor)?;
 		// get the valid genesis txs from the genesis spec if any 
 		let block_extrinsics = match genesis_storage.top.get(GENESIS_EXTRINSIC_KEY) {
 			Some(v) => <Vec<Block::Extrinsic>>::decode(&mut &v[..]).unwrap_or_default(),
