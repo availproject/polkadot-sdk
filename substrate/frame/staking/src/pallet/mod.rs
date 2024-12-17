@@ -1537,17 +1537,12 @@ pub mod pallet {
 			let last_item = slash_indices[slash_indices.len() - 1];
 			ensure!((last_item as usize) < unapplied.len(), Error::<T>::InvalidSlashIndex);
 
-			// FUSION CHANGE
-			let mut removed_slash_validators = Vec::new();
-			for (removed, index) in slash_indices.into_iter().enumerate() {
+			for (removed, index) in slash_indices.clone().into_iter().enumerate() {
 				let index = (index as usize) - removed;
-				let removed_element = unapplied.remove(index);
-				removed_slash_validators.push(removed_element.validator);
+				unapplied.remove(index);
 			}
 
-			if !removed_slash_validators.is_empty() {
-				T::FusionExt::cancel_fusion_slash(era, &removed_slash_validators);
-			}
+			T::FusionExt::cancel_fusion_slash(era, slash_indices);
 
 			UnappliedSlashes::<T>::insert(&era, &unapplied);
 			Ok(())

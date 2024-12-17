@@ -34,7 +34,7 @@ pub trait FusionExt<AccountId, Balance, PoolId> {
 	) -> Weight;
 
 	/// If a slash was cancelled and it concerned a Fusion pool, we need to cancel it there too
-	fn cancel_fusion_slash(era: EraIndex, slash_validators: &Vec<AccountId>) -> ();
+	fn cancel_fusion_slash(era: EraIndex, slash_indices: Vec<u32>) -> ();
 
 	/// If a slash is applied, we need to intercept it and take the corresponding fusion currencies
 	/// Returns true if the nominator is a fusion pool (regardless if it succeed to get slashed)
@@ -84,7 +84,7 @@ impl<AccountId, Balance, PoolId> FusionExt<AccountId, Balance, PoolId> for () {
 		Weight::from_parts(0, 0)
 	}
 
-	fn cancel_fusion_slash(_era: EraIndex, _slash_validators: &Vec<AccountId>) -> () {
+	fn cancel_fusion_slash(_era: EraIndex, _slash_indices: Vec<u32>) -> () {
 		()
 	}
 
