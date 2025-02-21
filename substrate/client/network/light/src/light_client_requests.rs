@@ -52,7 +52,7 @@ pub fn generate_protocol_config<Hash: AsRef<[u8]>>(
 		fallback_names: std::iter::once(generate_legacy_protocol_name(protocol_id).into())
 			.collect(),
 		max_request_size: 1 * 1024 * 1024,
-		max_response_size: 16 * 1024 * 1024,
+		max_response_size: 512 * 1024 * 1024,
 		request_timeout: Duration::from_secs(15),
 		inbound_queue: None,
 	}
