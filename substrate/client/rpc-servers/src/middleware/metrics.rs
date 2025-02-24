@@ -138,9 +138,9 @@ impl RpcMetrics {
 		self.ws_sessions_opened.as_ref().map(|counter| counter.inc());
 		if let Some(ws_sessions_opened) = &self.ws_sessions_opened {
 			if let Some(ws_sessions_closed) = &self.ws_sessions_closed {
-				let active_connections = ws_sessions_opened.get() - ws_sessions_closed.get();
-				log::info!(
-					target: "rpc_metrics",
+				let active_connections = ws_sessions_opened.get().saturating_sub(ws_sessions_closed.get());
+				log::debug!(
+					target: "ws_metrics",
 					"{{ \"wsSessionsOpened\": {:?}, \"activeConnections\": {:?} }}",
 					ws_sessions_opened.get(),
 					active_connections
@@ -158,9 +158,9 @@ impl RpcMetrics {
 
 		if let Some(ws_sessions_closed) = &self.ws_sessions_closed {
 			if let Some(ws_sessions_opened) = &self.ws_sessions_opened {
-				let active_connections = ws_sessions_opened.get() - ws_sessions_closed.get();
-				log::info!(
-					target: "rpc_metrics",
+				let active_connections = ws_sessions_opened.get().saturating_sub(ws_sessions_closed.get());
+				log::debug!(
+					target: "ws_metrics",
 					"{{ \"wsSessionsClosed\": {:?}, \"activeConnections\": {:?} }}",
 					ws_sessions_closed.get(),
 					active_connections
