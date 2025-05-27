@@ -5,11 +5,11 @@ use super::LOG_TARGET;
 
 const ORIGINAL_PALLET_INDEX: u8 = 0x00;
 const ORIGINAL_CALL_INDEX: u8 = 0x07;
-const LITE_CALL_INDEX: u8 = 0x0C;
+const LIGHT_CALL_INDEX: u8 = 0x0C;
 
-/// Convert `remark_with_event` extrinsic to `remark_with_event_lite` format.
-pub fn convert_da_to_lite(original: &OpaqueExtrinsic) -> Option<OpaqueExtrinsic> {
-    log::debug!(target: LOG_TARGET, "Converting DA to its lite version");
+/// Convert `remark_with_event` extrinsic to `remark_with_event_light` format.
+pub fn convert_da_to_light(original: &OpaqueExtrinsic) -> Option<OpaqueExtrinsic> {
+    log::debug!(target: LOG_TARGET, "Converting DA to its light version");
 
     let encoded = original.encode();
     let mut input = &encoded[..];
@@ -77,7 +77,7 @@ pub fn convert_da_to_lite(original: &OpaqueExtrinsic) -> Option<OpaqueExtrinsic>
 
     // === Construct new call ===
     payload.push(ORIGINAL_PALLET_INDEX); // Pallet index for DA
-    payload.push(LITE_CALL_INDEX); // Call index for `remark_with_event_lite`
+    payload.push(LIGHT_CALL_INDEX); // Call index for `remark_with_event_light`
 
     // remark.encode_to(&mut payload);
     remark_hash.encode_to(&mut payload);
@@ -92,7 +92,7 @@ pub fn convert_da_to_lite(original: &OpaqueExtrinsic) -> Option<OpaqueExtrinsic>
     match OpaqueExtrinsic::from_bytes(&out[..]) {
         Ok(opaque) => Some(opaque),
         Err(e) => {
-            log::error!(target: LOG_TARGET, "Failed to convert to lite extrinsic: {:?}", e);
+            log::error!(target: LOG_TARGET, "Failed to convert to light extrinsic: {:?}", e);
             None
         }
     }
@@ -168,12 +168,12 @@ pub fn is_da_extrinsic(ext: &OpaqueExtrinsic) -> bool {
     matches!(extract_dispatch_indices(ext), Some((ORIGINAL_PALLET_INDEX, ORIGINAL_CALL_INDEX)))
 }
 
-/// Check if the extrinsic is either DA or its lite version.
+/// Check if the extrinsic is either DA or its light version.
 pub fn is_any_da(ext: &OpaqueExtrinsic) -> bool {
     matches!(
         extract_dispatch_indices(ext),
         Some((ORIGINAL_PALLET_INDEX, ORIGINAL_CALL_INDEX))
-            | Some((ORIGINAL_PALLET_INDEX, LITE_CALL_INDEX))
+            | Some((ORIGINAL_PALLET_INDEX, LIGHT_CALL_INDEX))
     )
 }
 

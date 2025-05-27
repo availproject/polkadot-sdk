@@ -190,7 +190,7 @@ pub fn extrinsics_data_root<H: Hash>(xts: Vec<Vec<u8>>) -> H::Output {
 
 const ORIGINAL_PALLET_INDEX: u8 = 0x00;
 const ORIGINAL_CALL_INDEX: u8 = 0x07;
-const LITE_CALL_INDEX: u8 = 0x0C;
+const LIGHT_CALL_INDEX: u8 = 0x0C;
 
 pub fn filtered_extrinsics_data_root<H: Hash>(xts: Vec<Vec<u8>>) -> H::Output {
     let filtered = xts
@@ -257,7 +257,7 @@ pub fn filtered_extrinsics_data_root<H: Hash>(xts: Vec<Vec<u8>>) -> H::Output {
 
             // === Filter out target extrinsics ===
             !((pallet == ORIGINAL_PALLET_INDEX && call == ORIGINAL_CALL_INDEX)
-                || (pallet == ORIGINAL_PALLET_INDEX && call == LITE_CALL_INDEX))
+                || (pallet == ORIGINAL_PALLET_INDEX && call == LIGHT_CALL_INDEX))
         })
         .collect::<Vec<_>>();
 
@@ -759,8 +759,6 @@ pub mod pallet {
 		#[pallet::weight(
 			T::SystemWeightInfo::remark_with_event(10u32)
 		)]
-		// #[pallet::feeless_if(|origin: &OriginFor<T>,
-		// 	remark: &Vec<u8>,| -> bool { true })]
 		pub fn remark_with_event(
 			origin: OriginFor<T>,
 			remark: Vec<u8>,
@@ -771,14 +769,12 @@ pub mod pallet {
 			Ok(().into())
 		}
 
-		/// Lite version of remark_with_event. Not recommended for general use.
+		/// Light version of remark_with_event. Not recommended for general use.
 		#[pallet::call_index(12)]
 		#[pallet::weight(
 			T::SystemWeightInfo::remark_with_event(10u32)
 		)]
-		// #[pallet::feeless_if(|origin: &OriginFor<T>,
-		// 	hash: &T::Hash| -> bool { true })]
-		pub fn remark_with_event_lite(
+		pub fn remark_with_event_light(
 			origin: OriginFor<T>,
 			hash: T::Hash, // hash of the remark_with_event's remark
 		) -> DispatchResultWithPostInfo {
@@ -1850,7 +1846,7 @@ impl<T: Config> Pallet<T> {
 			.map(ExtrinsicData::<T>::take)
 			.collect();
 		// let extrinsics_root = extrinsics_data_root::<T::Hashing>(extrinsics);
-		// extrinsics_root will be computed by filtering out original & lite DA extrinsics
+		// extrinsics_root will be computed by filtering out original & light DA extrinsics
 		let extrinsics_root = filtered_extrinsics_data_root::<T::Hashing>(extrinsics);
 
 		// move block hash pruning window by one block

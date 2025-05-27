@@ -40,7 +40,7 @@ use sp_std::{fmt, prelude::*};
 /// the decoding fails.
 const EXTRINSIC_FORMAT_VERSION: u8 = 4;
 
-const SYSTEM_REMARK_WITH_EVENT_LITE_PREFIX: &[u8] = &[0x00, 0x0c]; // Prefix for system::remark_with_event_lite
+const SYSTEM_REMARK_WITH_EVENT_LIGHT_PREFIX: &[u8] = &[0x00, 0x0c]; // Prefix for system::remark_with_event_light
 
 /// The `SingaturePayload` of `UncheckedExtrinsic`.
 type UncheckedSignaturePayload<Address, Signature, Extra> = (Address, Signature, Extra);
@@ -177,9 +177,9 @@ where
 			Some((signed, signature, extra)) => {
 				let signed = lookup.lookup(signed)?;
 
-				let is_valid = if call_encoded.starts_with(SYSTEM_REMARK_WITH_EVENT_LITE_PREFIX) {
-					log::info!("bypassing the signature verification for remark_with_event_lite!");
-					// lets bypass the signature verification for remark_with_event_lite
+				let is_valid = if call_encoded.starts_with(SYSTEM_REMARK_WITH_EVENT_LIGHT_PREFIX) {
+					log::info!("bypassing the signature verification for remark_with_event_light!");
+					// lets bypass the signature verification for remark_with_event_light
 					true
 				} else {
 					let raw_payload = SignedPayload::new(self.function.clone(), extra.clone())?;
