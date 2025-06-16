@@ -3,9 +3,12 @@ use codec::{Compact, Decode, Encode, Input};
 use sp_core::blake2_256;
 use super::LOG_TARGET;
 
-const ORIGINAL_PALLET_INDEX: u8 = 0x00;
-const ORIGINAL_CALL_INDEX: u8 = 0x07;
-const LIGHT_CALL_INDEX: u8 = 0x0C;
+// const ORIGINAL_PALLET_INDEX: u8 = 0x00;
+// const ORIGINAL_CALL_INDEX: u8 = 0x07;
+// const LIGHT_CALL_INDEX: u8 = 0x0C;
+const ORIGINAL_PALLET_INDEX: u8 = 0x1d; // DA pallet index
+const ORIGINAL_CALL_INDEX: u8 = 0x05;
+const LIGHT_CALL_INDEX: u8 = 0x06;
 
 /// Convert `remark_with_event` extrinsic to `remark_with_event_light` format.
 pub fn convert_da_to_light(original: &OpaqueExtrinsic) -> Option<OpaqueExtrinsic> {
@@ -71,16 +74,16 @@ pub fn convert_da_to_light(original: &OpaqueExtrinsic) -> Option<OpaqueExtrinsic
     }
 
     // === Decode call args ===
-    let remark: Vec<u8> = Decode::decode(&mut input).ok()?;
-    let remark_hash = blake2_256(&remark);
-    log::info!(target: LOG_TARGET, "Remark hash: {:?}", remark_hash);
+    let data: Vec<u8> = Decode::decode(&mut input).ok()?;
+    let data_hash = blake2_256(&data);
+    log::info!(target: LOG_TARGET, "Data hash: {:?}", data_hash);
 
     // === Construct new call ===
     payload.push(ORIGINAL_PALLET_INDEX); // Pallet index for DA
-    payload.push(LIGHT_CALL_INDEX); // Call index for `remark_with_event_light`
+    payload.push(LIGHT_CALL_INDEX); // Call index for `light` DA
 
     // remark.encode_to(&mut payload);
-    remark_hash.encode_to(&mut payload);
+    data_hash.encode_to(&mut payload);
 
     // === Encode length prefix ===
     let mut out = Vec::new();
@@ -187,6 +190,6 @@ fn test_extract_dispatch_indices() {
     let indices = extract_dispatch_indices(&opaque);
 
     println!("Indices: {:?}", indices);
-    assert_eq!(indices, Some((0x1d, 0x01))); // <-- replace with expected
+    assert_eq!(indices, Some((ORIGINAL_PALLET_INDEX, ORIGINAL_CALL_INDEX)));
     assert!(is_da_extrinsic(&opaque));
 }
