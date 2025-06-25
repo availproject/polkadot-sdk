@@ -132,6 +132,22 @@ impl PeerStoreHandle {
 	pub fn add_known_peer(&mut self, peer_id: PeerId) {
 		self.inner.lock().add_known_peer(peer_id);
 	}
+
+	/// Get the list of supernode peers.
+	pub fn get_supernodes(&self) -> Vec<PeerId> {
+    	self.inner
+			.lock()
+			.peers
+			.iter()
+			.filter_map(|(peer_id, info)| {
+				if info.role == Some(ObservedRole::Supernode) {
+					Some(peer_id.clone())
+				} else {
+					None
+				}
+			})
+			.collect()
+	}
 }
 
 #[derive(Debug, Clone, Copy)]
