@@ -19,7 +19,7 @@
 
 use crate::{
 	block_relay_protocol::{BlockDownloader, BlockRelayParams, BlockResponseError, BlockServer},
-	da_utils::{is_da_extrinsic, convert_da_to_light},
+	da_utils::{is_da_extrinsic, is_any_da, convert_da_to_light},
 	schema::v1::{
 		block_request::FromBlock as FromBlockSchema, BlockRequest as BlockRequestSchema,
 		BlockResponse as BlockResponseSchema, BlockResponse, Direction,
@@ -410,26 +410,52 @@ where
 
 				let body = if get_body {
 					match self.client.block_body(hash)? {
-						Some(extrinsics) => extrinsics
-							.iter()
-							.map(|extrinsic| {
-								let encoded  = extrinsic.encode();
-								let opaque_extrinsic = OpaqueExtrinsic::decode(&mut &encoded[..]).expect("Failed  to decode opaque");
-								if !get_da_exts && is_da_extrinsic(&opaque_extrinsic) {
-									log::debug!(target: LOG_TARGET, "DA extrinsic detected, trying to convert it to light.");
-									// Replace DA extrinsic with light extrinsic.
-									let encoded = convert_da_to_light(&opaque_extrinsic)
-										.map(|light| light.encode())
-										.unwrap_or_else(|| {
-											log::error!(target: LOG_TARGET, "Failed to convert DA extrinsic to light.");
-											encoded
-										});
-									encoded
+						Some(extrinsics) => {
+							let mut encoded_extrinsics = Vec::with_capacity(extrinsics.len());
+
+							for extrinsic in extrinsics.iter() {
+								let encoded = extrinsic.encode();
+								let mut input = &encoded[..];
+								let opaque = match OpaqueExtrinsic::decode(&mut input) {
+									Ok(o) => o,
+									Err(_) => {
+										log::warn!(target: LOG_TARGET, "Failed to decode extrinsic in block {hash:?}");
+										continue;
+									}
+								};
+
+								if get_da_exts {
+									// Expect original DA if any DA
+									if is_any_da(&opaque) {
+										if !is_da_extrinsic(&opaque) {
+											log::debug!(
+												target: LOG_TARGET,
+												"Requested DA extrinsics, but found light DA in block {hash:?}"
+											);
+											return Err(HandleRequestError::MissingDaExtrinsics);
+										}
+									}
+									// Include original as-is
+									encoded_extrinsics.push(encoded);
 								} else {
-									encoded
+									// If original DA, convert to light
+									if is_da_extrinsic(&opaque) {
+										match convert_da_to_light(&opaque) {
+											Some(light) => encoded_extrinsics.push(light.encode()),
+											None => {
+												log::error!(target: LOG_TARGET, "Failed to convert DA extrinsic to light.");
+												encoded_extrinsics.push(encoded); // fallback to original
+											}
+										}
+									} else {
+										// Light DA or normal extrinsic
+										encoded_extrinsics.push(encoded);
+									}
 								}
-							})
-							.collect(),
+							}
+
+							encoded_extrinsics
+						}
 						None => {
 							log::trace!(target: LOG_TARGET, "Missing data for block request.");
 							break;
@@ -499,6 +525,7 @@ where
 
 		Ok(BlockResponse { blocks })
 	}
+
 }
 
 #[async_trait::async_trait]
@@ -528,6 +555,8 @@ enum HandleRequestError {
 	Client(#[from] sp_blockchain::Error),
 	#[error("Failed to send response.")]
 	SendResponse,
+	#[error("Missing DA extrinsics.")]
+	MissingDaExtrinsics,
 }
 
 /// The full block downloader implementation of [`BlockDownloader].
