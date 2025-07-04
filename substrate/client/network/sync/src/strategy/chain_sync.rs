@@ -30,7 +30,7 @@
 
 use crate::{
 	blocks::BlockCollection,
-	da_utils::is_any_da,
+	da_utils::{is_any_da, is_da_extrinsic},
 	extra_requests::ExtraRequests,
 	schema::v1::StateResponse,
 	strategy::{
@@ -124,6 +124,9 @@ mod rep {
 
 	/// Peer response data does not have requested bits.
 	pub const BAD_RESPONSE: Rep = Rep::new(-(1 << 12), "Incomplete response");
+
+	/// Peer response data does not have DA_EXTRINSICs.
+	pub const DA_MISSING: Rep = Rep::new(i32::MIN, "DA extriniscs missing in response");
 }
 
 struct Metrics {
@@ -2238,7 +2241,7 @@ pub fn validate_blocks<Block: BlockT>(
 	peer_id: &PeerId,
 	request: Option<BlockRequest<Block>>,
 ) -> Result<Option<NumberFor<Block>>, BadPeer> {
-	if let Some(request) = request {
+	if let Some(ref request) = request {
 		if Some(blocks.len() as _) > request.max {
 			debug!(
 				target: LOG_TARGET,
@@ -2291,7 +2294,6 @@ pub fn validate_blocks<Block: BlockT>(
 
 			return Err(BadPeer(*peer_id, rep::BAD_RESPONSE));
 		}
-		// TODO: Maybe check if Da Extrinsics were requested and not received? (only on DA blocks)
 	}
 
 	for b in blocks {
@@ -2309,21 +2311,46 @@ pub fn validate_blocks<Block: BlockT>(
 			}
 		}
 		if let (Some(header), Some(body)) = (&b.header, &b.body) {
+			let decoded_extrinsics: Vec<(OpaqueExtrinsic, Vec<u8>)> = body.iter()
+				.filter_map(|ext| {
+					let encoded = ext.encode();
+					let mut input = &encoded[..];
+					OpaqueExtrinsic::decode(&mut input)
+						.ok()
+						.map(|decoded| (decoded, encoded))
+				})
+				.collect();
+
+			if let Some(request) = &request {
+				let has_any_da = decoded_extrinsics.iter().any(|(ext, _)| is_any_da(ext));
+
+				if has_any_da && request.fields.contains(BlockAttributes::DA_EXTRINSICS) {
+					let all_valid = decoded_extrinsics.iter().all(|(ext, _)| {
+						if is_any_da(ext) {
+							is_da_extrinsic(ext)
+						} else {
+							true
+						}
+					});
+
+					if !all_valid {
+						debug!(
+							target: LOG_TARGET,
+							"Block {} received from {} doesn't contain requested DA extrinsics.",
+							b.hash,
+							peer_id,
+						);
+						return Err(BadPeer(*peer_id, rep::DA_MISSING));
+					}
+				}
+			}
 			let expected = *header.extrinsics_root();
 			// Filter out DA extrinsics before computing root
-			let filtered_extrinsics: Vec<Vec<u8>> = body
-			.iter()
-			.filter_map(|ext| {
-				let encoded = ext.encode();
-				let mut input = &encoded[..];
-
-				match OpaqueExtrinsic::decode(&mut input) {
-					Ok(op_ext) if !is_any_da(&op_ext) => Some(encoded),
-					_ => None,
-				}
-			})
-			.collect();
-
+			let filtered_extrinsics: Vec<Vec<u8>> = decoded_extrinsics
+				.iter()
+				.filter(|(ext, _)| !is_any_da(ext))
+				.map(|(_, enc)| enc.clone())
+				.collect();
 			let got = HashingFor::<Block>::ordered_trie_root(
 				filtered_extrinsics,
 				sp_runtime::StateVersion::V0,

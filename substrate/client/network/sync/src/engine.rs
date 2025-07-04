@@ -713,7 +713,7 @@ where
 
 					trace!(
 						target: LOG_TARGET,
-						"Processed `ChainSyncAction::SendBlockRequest` to {peer_id}.",
+						"Processed `ChainSyncAction::SendStateRequest` to {peer_id}.",
 					);
 				},
 				SyncingAction::SendWarpProofRequest { peer_id, request } => {
