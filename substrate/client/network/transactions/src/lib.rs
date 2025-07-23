@@ -322,8 +322,8 @@ where
 			futures::select! {
 				_ = self.propagate_timeout.next() => {
 					// Maybe we can have a flag to decide whetehr to only announce the transation summary or propagate transactions
-					// self.propagate_transactions();
-					self.announce_transactions();
+					self.propagate_transactions();
+					// self.announce_transactions();
 				},
 				(tx_hash, result) = self.pending_transactions.select_next_some() => {
 					if let Some(peers) = self.pending_transactions_peers.remove(&tx_hash) {
@@ -393,32 +393,32 @@ where
 				debug_assert!(_peer.is_some());
 			},
 			NotificationEvent::NotificationReceived { peer, notification } => {
-				// if let Ok(m) =
-				// 	<Transactions<B::Extrinsic> as Decode>::decode(&mut notification.as_ref())
-				// {
-				// 	self.on_transactions(peer, m);
-				// } else {
-				// 	warn!(target: "sub-libp2p", "Failed to decode transactions list");
-				// }
+				if let Ok(m) =
+					<Transactions<B::Extrinsic> as Decode>::decode(&mut notification.as_ref())
+				{
+					self.on_transactions(peer, m);
+				} else {
+					warn!(target: "sub-libp2p", "Failed to decode transactions list");
+				}
 				// Decode the incoming message to TransactionMessage type & handle each type
 				// For now, not handling the existing message types
-				if let Ok(message) =
-					TransactionMessage::<B::Extrinsic, H>::decode(&mut notification.as_ref())
-				{
-					match message {
-						TransactionMessage::Transactions(transactions) => {
-							self.on_transactions(peer, transactions);
-						},
-						TransactionMessage::TransactionAnnouncement(summaries) => {
-							self.handle_announcement(peer, summaries);
-						},
-						TransactionMessage::TransactionRequest(hashes) => {
-							self.handle_request(peer, hashes);
-						},
-					}
-				} else {
-					warn!(target: "sub-libp2p", "Failed to decode TransactionMessage");
-				}
+				// if let Ok(message) =
+				// 	TransactionMessage::<B::Extrinsic, H>::decode(&mut notification.as_ref())
+				// {
+				// 	match message {
+				// 		TransactionMessage::Transactions(transactions) => {
+				// 			self.on_transactions(peer, transactions);
+				// 		},
+				// 		TransactionMessage::TransactionAnnouncement(summaries) => {
+				// 			self.handle_announcement(peer, summaries);
+				// 		},
+				// 		TransactionMessage::TransactionRequest(hashes) => {
+				// 			self.handle_request(peer, hashes);
+				// 		},
+				// 	}
+				// } else {
+				// 	warn!(target: "sub-libp2p", "Failed to decode TransactionMessage");
+				// }
 			},
 		}
 	}
