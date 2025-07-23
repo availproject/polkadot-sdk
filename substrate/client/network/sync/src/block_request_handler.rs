@@ -84,7 +84,7 @@ pub fn generate_protocol_config<Hash: AsRef<[u8]>>(
 			.collect(),
 		max_request_size: 1024 * 1024,
 		max_response_size: 10 * 1024 * 1024 * 1024,
-		request_timeout: Duration::from_secs(20),
+		request_timeout: Duration::from_secs(120),
 		inbound_queue: None,
 	}
 }
