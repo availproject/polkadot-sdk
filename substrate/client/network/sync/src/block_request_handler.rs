@@ -58,7 +58,7 @@ use std::{
 /// Maximum blocks per response.
 pub(crate) const MAX_BLOCKS_IN_RESPONSE: usize = 128;
 
-const MAX_BODY_BYTES: usize = 8 * 1024 * 1024;
+const MAX_BODY_BYTES: usize = 512 * 1024 * 1024;
 const MAX_NUMBER_OF_SAME_REQUESTS_PER_PEER: usize = 2;
 
 mod rep {
@@ -83,7 +83,7 @@ pub fn generate_protocol_config<Hash: AsRef<[u8]>>(
 		fallback_names: std::iter::once(generate_legacy_protocol_name(protocol_id).into())
 			.collect(),
 		max_request_size: 1024 * 1024,
-		max_response_size: 16 * 1024 * 1024,
+		max_response_size: 512 * 1024 * 1024,
 		request_timeout: Duration::from_secs(20),
 		inbound_queue: None,
 	}
