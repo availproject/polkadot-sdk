@@ -99,7 +99,7 @@ const TICK_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1100)
 /// Maximum number of known block hashes to keep for a peer.
 const MAX_KNOWN_BLOCKS: usize = 1024; // ~32kb per peer + LruHashSet overhead
 
-/// If the block announces stream to peer has been inactive for 30 seconds meaning local node
+/// If the block announces stream to peer has been inactive for 30 seconds (5 blocks so for Avail -> 100 seconds) meaning local node
 /// has not sent or received block announcements to/from the peer, report the node for inactivity,
 /// disconnect it and attempt to establish connection to some other peer.
 const INACTIVITY_EVICT_THRESHOLD: Duration = Duration::from_secs(100);
@@ -117,8 +117,7 @@ const INACTIVITY_EVICT_THRESHOLD: Duration = Duration::from_secs(100);
 const INITIAL_EVICTION_WAIT_PERIOD: Duration = Duration::from_secs(3 * 60);
 
 /// Maximum allowed size for a block announce.
-/// More than enough to support a block size of upto 64 MiB
-const MAX_BLOCK_ANNOUNCE_SIZE: u64 = 1024 * 1024;
+const MAX_BLOCK_ANNOUNCE_SIZE: u64 = 512 * 1024 * 1024;
 
 mod rep {
 	use sc_network::ReputationChange as Rep;

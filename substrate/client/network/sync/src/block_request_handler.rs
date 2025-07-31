@@ -82,9 +82,9 @@ pub fn generate_protocol_config<Hash: AsRef<[u8]>>(
 		name: generate_protocol_name(genesis_hash, fork_id).into(),
 		fallback_names: std::iter::once(generate_legacy_protocol_name(protocol_id).into())
 			.collect(),
-		max_request_size: 1024 * 1024,
+		max_request_size: 16 * 1024 * 1024,
 		max_response_size: 128 * 1024 * 1024,
-		request_timeout: Duration::from_secs(120),
+		request_timeout: Duration::from_secs(20),
 		inbound_queue: None,
 	}
 }
