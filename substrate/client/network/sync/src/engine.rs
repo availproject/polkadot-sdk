@@ -102,7 +102,7 @@ const MAX_KNOWN_BLOCKS: usize = 1024; // ~32kb per peer + LruHashSet overhead
 /// If the block announces stream to peer has been inactive for 30 seconds meaning local node
 /// has not sent or received block announcements to/from the peer, report the node for inactivity,
 /// disconnect it and attempt to establish connection to some other peer.
-const INACTIVITY_EVICT_THRESHOLD: Duration = Duration::from_secs(30);
+const INACTIVITY_EVICT_THRESHOLD: Duration = Duration::from_secs(100);
 
 /// When `SyncingEngine` is started, wait two minutes before actually staring to count peers as
 /// evicted.
@@ -114,9 +114,10 @@ const INACTIVITY_EVICT_THRESHOLD: Duration = Duration::from_secs(30);
 ///
 /// To prevent this from happening, define a threshold for how long `SyncingEngine` should wait
 /// before it starts evicting peers.
-const INITIAL_EVICTION_WAIT_PERIOD: Duration = Duration::from_secs(2 * 60);
+const INITIAL_EVICTION_WAIT_PERIOD: Duration = Duration::from_secs(3 * 60);
 
 /// Maximum allowed size for a block announce.
+/// More than enough to support a block size of upto 64 MiB
 const MAX_BLOCK_ANNOUNCE_SIZE: u64 = 1024 * 1024;
 
 mod rep {
