@@ -117,7 +117,7 @@ const INACTIVITY_EVICT_THRESHOLD: Duration = Duration::from_secs(100);
 const INITIAL_EVICTION_WAIT_PERIOD: Duration = Duration::from_secs(3 * 60);
 
 /// Maximum allowed size for a block announce.
-const MAX_BLOCK_ANNOUNCE_SIZE: u64 = 512 * 1024 * 1024;
+const MAX_BLOCK_ANNOUNCE_SIZE: u64 = 128 * 1024 * 1024;
 
 mod rep {
 	use sc_network::ReputationChange as Rep;
