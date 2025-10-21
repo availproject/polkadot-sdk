@@ -266,7 +266,9 @@ impl LoggerBuilder {
 	///
 	/// This sets various global logging and tracing instances and thus may only be called once.
 	pub fn init(self) -> Result<()> {
-		if let Some((tracing_receiver, profiling_targets)) = self.profiling {
+		return Ok(());
+
+/* 		if let Some((tracing_receiver, profiling_targets)) = self.profiling {
 			if self.log_reloading {
 				let subscriber = prepare_subscriber(
 					&self.directives,
@@ -328,7 +330,7 @@ impl LoggerBuilder {
 			tracing::subscriber::set_global_default(subscriber)?;
 
 			Ok(())
-		}
+		} */
 	}
 }
 
