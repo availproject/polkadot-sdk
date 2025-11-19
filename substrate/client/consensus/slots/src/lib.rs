@@ -200,14 +200,6 @@ pub trait SimpleSlotWorker<B: BlockT> {
 			end_proposing_at.saturating_duration_since(Instant::now());
 		let logs = self.pre_digest_data(slot, claim);
 
-		// Now proposing_remaininig_duration should be around 15 seconds here, out of which we give the deadline as 10 seconds
-		let HEADER_CUT_OFF = Duration::from_secs(5);
-		let deadline = if proposing_remaining_duration > HEADER_CUT_OFF {
-			(proposing_remaining_duration - HEADER_CUT_OFF).mul_f32(0.98)
-		} else {
-			proposing_remaining_duration.mul_f32(0.98)
-		};
-
 		// deadline our production to 98% of the total time left for proposing. As we deadline
 		// the proposing below to the same total time left, the 2% margin should be enough for
 		// the result to be returned.
@@ -215,7 +207,7 @@ pub trait SimpleSlotWorker<B: BlockT> {
 			.propose(
 				inherent_data,
 				sp_runtime::generic::Digest { logs },
-				deadline,
+				proposing_remaining_duration.mul_f32(0.98),
 				slot_info.block_size_limit,
 			)
 			.map_err(|e| sp_consensus::Error::ClientImport(e.to_string()));
