@@ -130,6 +130,18 @@ impl RpcMetrics {
 
 	pub(crate) fn ws_connect(&self) {
 		self.ws_sessions_opened.as_ref().map(|counter| counter.inc());
+		if let Some(ws_sessions_opened) = &self.ws_sessions_opened {
+			if let Some(ws_sessions_closed) = &self.ws_sessions_closed {
+				let active_connections = ws_sessions_opened.get().saturating_sub(ws_sessions_closed.get());
+				log::debug!(
+					target: "ws_metrics",
+					"{{ \"wsSessionsOpened\": {:?}, \"activeConnections\": {:?} }}",
+					ws_sessions_opened.get(),
+					active_connections
+				);
+			}
+		}
+
 	}
 
 	pub(crate) fn ws_disconnect(&self, now: Instant) {
@@ -137,11 +149,22 @@ impl RpcMetrics {
 
 		self.ws_sessions_closed.as_ref().map(|counter| counter.inc());
 		self.ws_sessions_time.with_label_values(&["ws"]).observe(micros as _);
+
+		if let Some(ws_sessions_closed) = &self.ws_sessions_closed {
+			if let Some(ws_sessions_opened) = &self.ws_sessions_opened {
+				let active_connections = ws_sessions_opened.get() - ws_sessions_closed.get();
+				log::info!(
+					target: "rpc_metrics",
+					"{{ \"wsSessionsClosed\": {:?}, \"activeConnections\": {:?} }}",
+					ws_sessions_closed.get(),
+					active_connections
+				);
+			}
+		}
 	}
 
 	pub(crate) fn on_call(&self, req: &Request, transport_label: &'static str) {
 		log::trace!(
-			target: "rpc_metrics",
 			"[{transport_label}] on_call name={} params={:?}",
 			req.method_name(),
 			req.params(),
@@ -189,7 +212,6 @@ impl RpcMetrics {
 			.inc();
 	}
 }
-
 /// Metrics with transport label.
 #[derive(Clone, Debug)]
 pub struct Metrics {

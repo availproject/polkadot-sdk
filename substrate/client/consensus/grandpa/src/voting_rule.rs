@@ -270,7 +270,7 @@ where
 {
 	fn default() -> Self {
 		VotingRulesBuilder::new()
-			.add(BeforeBestBlockBy(2u32.into()))
+			.add(BeforeBestBlockBy(1u32.into()))
 			.add(ThreeQuartersOfTheUnfinalizedChain)
 	}
 }

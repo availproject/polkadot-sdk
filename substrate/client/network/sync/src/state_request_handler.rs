@@ -43,7 +43,7 @@ use std::{
 	time::Duration,
 };
 
-const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024; // Actual reponse may be bigger.
+const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024; // Actual reponse may be bigger.
 const MAX_NUMBER_OF_SAME_REQUESTS_PER_PEER: usize = 2;
 
 mod rep {
