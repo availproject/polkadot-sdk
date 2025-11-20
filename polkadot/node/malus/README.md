@@ -18,7 +18,7 @@ defined in the [(DSL[(**D**omain **S**pecific **L**anguage)]) doc](https://parit
 
 ## Usage
 
-> Assumes you already gained permissiones, ping in element `@javier:matrix.parity.io` to get access.
+> Assumes you already gained permissions, ping in element `@javier:matrix.parity.io` to get access.
 > and you have cloned the [zombienet][zombienet] repo.
 
 To launch a test case in the development cluster use (e.g. for the  ./node/malus/integrationtests/0001-dispute-valid-block.toml):
@@ -57,3 +57,8 @@ podman build -t paritypr/malus:v1 -f Containerfile ../../..
 
 [zombienet]: https://github.com/paritytech/zombienet
 [gke]: (https://github.com/paritytech/gurke/blob/main/docs/How-to-setup-access-to-gke-k8s-cluster.md)
+
+
+## Release
+
+Polkadot SDK stable2409

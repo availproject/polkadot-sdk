@@ -58,9 +58,14 @@ to update the Alliance's rule and make announcements.
 - `add_unscrupulous_items` - Add some items, either accounts or websites, to the list of
   unscrupulous items.
 - `remove_unscrupulous_items` - Remove some items from the list of unscrupulous items.
-- `abdicate_fellow_status` - Abdicate one's voting rights, demoting themself to Ally.
+- `abdicate_fellow_status` - Abdicate one's voting rights, demoting themselves to Ally.
 
 #### Root Calls
 
 - `init_members` - Initialize the Alliance, onboard fellows and allies.
 - `disband` - Disband the Alliance, remove all active members and unreserve deposits.
+
+
+## Release
+
+Polkadot SDK stable2409

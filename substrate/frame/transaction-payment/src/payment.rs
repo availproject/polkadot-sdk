@@ -18,17 +18,17 @@
 /// ! Traits and default implementation for paying transaction fees.
 use crate::Config;
 
+use core::marker::PhantomData;
 use sp_runtime::{
 	traits::{DispatchInfoOf, PostDispatchInfoOf, Saturating, Zero},
 	transaction_validity::InvalidTransaction,
 };
-use sp_std::marker::PhantomData;
 
 use frame_support::{
 	traits::{
 		fungible::{Balanced, Credit, Debt, Inspect},
 		tokens::Precision,
-		Currency, ExistenceRequirement, Imbalance, OnUnbalanced, TryDrop, WithdrawReasons,
+		Currency, ExistenceRequirement, Imbalance, OnUnbalanced, WithdrawReasons,
 	},
 	unsigned::TransactionValidityError,
 };
@@ -70,7 +70,7 @@ pub trait OnChargeTransaction<T: Config> {
 	) -> Result<(), TransactionValidityError>;
 }
 
-/// Implements transaction payment for a pallet implementing the [`fungible`]
+/// Implements transaction payment for a pallet implementing the [`frame_support::traits::fungible`]
 /// trait (eg. pallet_balances) using an unbalance handler (implementing
 /// [`OnUnbalanced`]).
 ///
@@ -121,11 +121,14 @@ where
 		if let Some(paid) = already_withdrawn {
 			// Calculate how much refund we should return
 			let refund_amount = paid.peek().saturating_sub(corrected_fee);
-			// refund to the the account that paid the fees. If this fails, the
-			// account might have dropped below the existential balance. In
-			// that case we don't refund anything.
-			let refund_imbalance = F::deposit(who, refund_amount, Precision::BestEffort)
-				.unwrap_or_else(|_| Debt::<T::AccountId, F>::zero());
+			// refund to the the account that paid the fees if it exists. otherwise, don't refind
+			// anything.
+			let refund_imbalance = if F::total_balance(who) > F::Balance::zero() {
+				F::deposit(who, refund_amount, Precision::BestEffort)
+					.unwrap_or_else(|_| Debt::<T::AccountId, F>::zero())
+			} else {
+				Debt::<T::AccountId, F>::zero()
+			};
 			// merge the imbalance caused by paying the fees and refunding parts of it again.
 			let adjusted_paid: Credit<T::AccountId, F> = paid
 				.offset(refund_imbalance)
@@ -146,7 +149,9 @@ where
 ///
 /// The unbalance handler is given 2 unbalanceds in [`OnUnbalanced::on_unbalanceds`]: `fee` and
 /// then `tip`.
-#[deprecated(note = "Please use the fungible trait and FungibleAdapter instead where possible.")]
+#[deprecated(
+	note = "Please use the fungible trait and FungibleAdapter. This struct will be removed some time after March 2024."
+)]
 pub struct CurrencyAdapter<C, OU>(PhantomData<(C, OU)>);
 
 /// Default implementation for a Currency and an OnUnbalanced handler.
