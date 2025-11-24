@@ -18,7 +18,7 @@
 //! > Made with *Substrate*, for *Polkadot*.
 //!
 //! [![github]](https://github.com/paritytech/polkadot-sdk/tree/master/substrate/frame/sudo)
-//! [![polkadot]](https://polkadot.network)
+//! [![polkadot]](https://polkadot.com)
 //!
 //! [github]: https://img.shields.io/badge/github-8da0cb?style=for-the-badge&labelColor=555555&logo=github
 //! [polkadot]: https://img.shields.io/badge/polkadot-E6007A?style=for-the-badge&logo=polkadot&logoColor=white
@@ -38,7 +38,7 @@
 //! In Substrate blockchains, pallets may contain dispatchable calls that can only be called at
 //! the system level of the chain (i.e. dispatchables that require a `Root` origin).
 //! Setting a privileged account, called the _sudo key_, allows you to make such calls as an
-//! extrinisic.
+//! extrinsic.
 //!
 //! Here's an example of a privileged function in another pallet:
 //!
@@ -85,8 +85,8 @@
 //! meant to be used by constructing runtime calls from outside the runtime.
 //! </pre></div>
 //!
-//! This pallet also defines a [`SignedExtension`](sp_runtime::traits::SignedExtension) called
-//! [`CheckOnlySudoAccount`] to ensure that only signed transactions by the sudo account are
+//! This pallet also defines a [`TransactionExtension`](sp_runtime::traits::TransactionExtension)
+//! called [`CheckOnlySudoAccount`] to ensure that only signed transactions by the sudo account are
 //! accepted by the transaction pool. The intended use of this signed extension is to prevent other
 //! accounts from spamming the transaction pool for the initial phase of a chain, during which
 //! developers may only want a sudo account to be able to make transactions.
@@ -121,8 +121,11 @@
 #![deny(missing_docs)]
 #![cfg_attr(not(feature = "std"), no_std)]
 
+extern crate alloc;
+
+use alloc::boxed::Box;
+
 use sp_runtime::{traits::StaticLookup, DispatchResult};
-use sp_std::prelude::*;
 
 use frame_support::{dispatch::GetDispatchInfo, traits::UnfilteredDispatchable};
 
@@ -156,7 +159,7 @@ pub mod pallet {
 		/// Default prelude sensible to be used in a testing environment.
 		pub struct TestDefaultConfig;
 
-		#[derive_impl(frame_system::config_preludes::TestDefaultConfig as frame_system::DefaultConfig, no_aggregated_types)]
+		#[derive_impl(frame_system::config_preludes::TestDefaultConfig, no_aggregated_types)]
 		impl frame_system::DefaultConfig for TestDefaultConfig {}
 
 		#[frame_support::register_default_impl(TestDefaultConfig)]
@@ -172,6 +175,7 @@ pub mod pallet {
 	pub trait Config: frame_system::Config {
 		/// The overarching event type.
 		#[pallet::no_default_bounds]
+		#[allow(deprecated)]
 		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
 
 		/// A sudo-able call.
@@ -194,7 +198,7 @@ pub mod pallet {
 		#[pallet::weight({
 			let dispatch_info = call.get_dispatch_info();
 			(
-				T::WeightInfo::sudo().saturating_add(dispatch_info.weight),
+				T::WeightInfo::sudo().saturating_add(dispatch_info.call_weight),
 				dispatch_info.class
 			)
 		})]
@@ -259,7 +263,7 @@ pub mod pallet {
 		#[pallet::weight({
 			let dispatch_info = call.get_dispatch_info();
 			(
-				T::WeightInfo::sudo_as().saturating_add(dispatch_info.weight),
+				T::WeightInfo::sudo_as().saturating_add(dispatch_info.call_weight),
 				dispatch_info.class,
 			)
 		})]
@@ -329,8 +333,7 @@ pub mod pallet {
 
 	/// The `AccountId` of the sudo key.
 	#[pallet::storage]
-	#[pallet::getter(fn key)]
-	pub(super) type Key<T: Config> = StorageValue<_, T::AccountId, OptionQuery>;
+	pub type Key<T: Config> = StorageValue<_, T::AccountId, OptionQuery>;
 
 	#[pallet::genesis_config]
 	#[derive(frame_support::DefaultNoBound)]
@@ -352,7 +355,7 @@ pub mod pallet {
 			let sender = ensure_signed_or_root(origin)?;
 
 			if let Some(sender) = sender {
-				if Self::key().map_or(false, |k| k == sender) {
+				if Key::<T>::get().map_or(false, |k| k == sender) {
 					Ok(())
 				} else {
 					Err(Error::<T>::RequireSudo.into())

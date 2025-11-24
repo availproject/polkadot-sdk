@@ -13,52 +13,42 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub use codec::Encode;
+#[cfg(test)]
+mod imports {
+	// Substrate
+	pub(crate) use frame_support::assert_ok;
 
-// Substrate
-pub use frame_support::{
-	assert_err, assert_ok,
-	pallet_prelude::Weight,
-	sp_runtime::{AccountId32, DispatchError, DispatchResult},
-	traits::fungibles::Inspect,
-};
+	// Polkadot
+	pub(crate) use xcm::{latest::WESTEND_GENESIS_HASH, prelude::*};
 
-// Polkadot
-pub use xcm::{
-	prelude::{AccountId32 as AccountId32Junction, *},
-	v3::{Error, NetworkId::Westend as WestendId},
-};
-
-// Cumulus
-pub use asset_test_utils::xcm_helpers;
-pub use emulated_integration_tests_common::{
-	test_parachain_is_trusted_teleporter,
-	xcm_emulator::{
-		assert_expected_events, bx, helpers::weight_within_threshold, Chain, Parachain as Para,
-		RelayChain as Relay, Test, TestArgs, TestContext, TestExt,
-	},
-	xcm_helpers::{xcm_transact_paid_execution, xcm_transact_unpaid_execution},
-	PROOF_SIZE_THRESHOLD, REF_TIME_THRESHOLD, XCM_V3,
-};
-pub use parachains_common::{AccountId, Balance};
-pub use westend_system_emulated_network::{
-	people_westend_emulated_chain::{
-		genesis::ED as PEOPLE_WESTEND_ED, PeopleWestendParaPallet as PeopleWestendPallet,
-	},
-	westend_emulated_chain::{genesis::ED as WESTEND_ED, WestendRelayPallet as WestendPallet},
-	PenpalAPara as PenpalA, PeopleWestendPara as PeopleWestend,
-	PeopleWestendParaReceiver as PeopleWestendReceiver,
-	PeopleWestendParaSender as PeopleWestendSender, WestendRelay as Westend,
-	WestendRelayReceiver as WestendReceiver, WestendRelaySender as WestendSender,
-};
-
-// pub const ASSET_ID: u32 = 1;
-// pub const ASSET_MIN_BALANCE: u128 = 1000;
-pub type RelayToSystemParaTest = Test<Westend, PeopleWestend>;
-pub type RelayToParaTest = Test<Westend, PenpalA>;
-pub type SystemParaToRelayTest = Test<PeopleWestend, Westend>;
-pub type SystemParaToParaTest = Test<PeopleWestend, PenpalA>;
-pub type ParaToSystemParaTest = Test<PenpalA, PeopleWestend>;
+	// Cumulus
+	pub(crate) use emulated_integration_tests_common::xcm_emulator::{
+		assert_expected_events, bx, Chain, Parachain as Para, TestExt,
+	};
+	pub(crate) use westend_system_emulated_network::{
+		self,
+		asset_hub_westend_emulated_chain::AssetHubWestendParaPallet as AssetHubWestendPallet,
+		bridge_hub_westend_emulated_chain::BridgeHubWestendParaPallet as BridgeHubWestendPallet,
+		collectives_westend_emulated_chain::CollectivesWestendParaPallet as CollectivesWestendPallet,
+		coretime_westend_emulated_chain::CoretimeWestendParaPallet as CoretimeWestendPallet,
+		penpal_emulated_chain::{PenpalAssetOwner, PenpalBParaPallet as PenpalBPallet},
+		people_westend_emulated_chain::{
+			people_westend_runtime::{
+				self, xcm_config::XcmConfig as PeopleWestendXcmConfig,
+				ExistentialDeposit as PeopleWestendExistentialDeposit,
+			},
+			PeopleWestendParaPallet as PeopleWestendPallet,
+		},
+		westend_emulated_chain::{genesis::ED as WESTEND_ED, WestendRelayPallet as WestendPallet},
+		AssetHubWestendPara as AssetHubWestend,
+		AssetHubWestendParaReceiver as AssetHubWestendReceiver,
+		BridgeHubWestendPara as BridgeHubWestend, CollectivesWestendPara as CollectivesWestend,
+		CoretimeWestendPara as CoretimeWestend, PenpalBPara as PenpalB,
+		PeopleWestendPara as PeopleWestend, PeopleWestendParaReceiver as PeopleWestendReceiver,
+		PeopleWestendParaSender as PeopleWestendSender, WestendRelay as Westend,
+		WestendRelayReceiver as WestendReceiver, WestendRelaySender as WestendSender,
+	};
+}
 
 #[cfg(test)]
 mod tests;

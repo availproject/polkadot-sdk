@@ -17,17 +17,22 @@
 use super::*;
 
 use crate::{disputes::SlashingHandler, initializer, shared};
-use frame_benchmarking::{benchmarks, whitelist_account};
+use codec::Decode;
+use frame_benchmarking::v2::*;
 use frame_support::traits::{OnFinalize, OnInitialize};
 use frame_system::{pallet_prelude::BlockNumberFor, RawOrigin};
 use pallet_staking::testing_utils::create_validators;
-use parity_scale_codec::Decode;
-use primitives::{Hash, PARACHAIN_KEY_TYPE_ID};
+use polkadot_primitives::{Hash, PARACHAIN_KEY_TYPE_ID};
 use sp_runtime::traits::{One, OpaqueKeys, StaticLookup};
 use sp_session::MembershipProof;
 
 // Candidate hash of the disputed candidate.
 const CANDIDATE_HASH: CandidateHash = CandidateHash(Hash::zero());
+
+// Simplify getting the value in the benchmark
+pub const fn max_validators_for<T: super::Config>() -> u32 {
+	<<T>::BenchmarkingConfig as BenchmarkingConfiguration>::MAX_VALIDATORS
+}
 
 pub trait Config:
 	pallet_session::Config
@@ -71,20 +76,26 @@ where
 		let proof: Vec<u8> = vec![];
 
 		whitelist_account!(controller);
+		pallet_session::Pallet::<T>::ensure_can_pay_key_deposit(&controller).unwrap();
 		pallet_session::Pallet::<T>::set_keys(RawOrigin::Signed(controller).into(), keys, proof)
 			.expect("session::set_keys should work");
 	}
 
 	pallet_session::Pallet::<T>::on_initialize(BlockNumberFor::<T>::one());
 	initializer::Pallet::<T>::on_initialize(BlockNumberFor::<T>::one());
+
+	// signal to `pallet-staking`'s `ElectionProvider` to be ready asap.
+	use frame_election_provider_support::ElectionProvider;
+	<<T as pallet_staking::Config>::ElectionProvider as ElectionProvider>::asap();
+
 	// skip sessions until the new validator set is enacted
 	while pallet_session::Pallet::<T>::validators().len() < n as usize {
 		pallet_session::Pallet::<T>::rotate_session();
 	}
 	initializer::Pallet::<T>::on_finalize(BlockNumberFor::<T>::one());
 
-	let session_index = crate::shared::Pallet::<T>::session_index();
-	let session_info = crate::session_info::Pallet::<T>::session_info(session_index);
+	let session_index = crate::shared::CurrentSessionIndex::<T>::get();
+	let session_info = crate::session_info::Sessions::<T>::get(session_index);
 	let session_info = session_info.unwrap();
 	let validator_id = session_info.validators.get(ValidatorIndex::from(0)).unwrap().clone();
 	let key = (PARACHAIN_KEY_TYPE_ID, validator_id.clone());
@@ -95,7 +106,7 @@ where
 	pallet_session::Pallet::<T>::rotate_session();
 	initializer::Pallet::<T>::on_finalize(BlockNumberFor::<T>::one());
 
-	let idx = crate::shared::Pallet::<T>::session_index();
+	let idx = crate::shared::CurrentSessionIndex::<T>::get();
 	assert!(
 		idx > session_index,
 		"session rotation should work for parachain pallets: {} <= {}",
@@ -106,7 +117,8 @@ where
 	(session_index, key_owner_proof, validator_id)
 }
 
-fn setup_dispute<T>(session_index: SessionIndex, validator_id: ValidatorId) -> DisputeProof
+/// Submits a single `ForInvalid` dispute.
+fn setup_dispute<T>(session_index: SessionIndex, validator_id: ValidatorId) -> DisputeProofV2
 where
 	T: Config,
 {
@@ -125,38 +137,32 @@ where
 	dispute_proof(session_index, validator_id, validator_index)
 }
 
+/// Creates a `ForInvalid` dispute proof.
 fn dispute_proof(
 	session_index: SessionIndex,
 	validator_id: ValidatorId,
 	validator_index: ValidatorIndex,
-) -> DisputeProof {
-	let kind = SlashingOffenceKind::ForInvalid;
+) -> DisputeProofV2 {
+	let kind = DisputeOffenceKind::ForInvalidBacked;
 	let time_slot = DisputesTimeSlot::new(session_index, CANDIDATE_HASH);
 
-	DisputeProof { time_slot, kind, validator_index, validator_id }
+	DisputeProofV2 { time_slot, kind, validator_index, validator_id }
 }
 
-benchmarks! {
-	where_clause {
-		where T: Config<KeyOwnerProof = MembershipProof>,
-	}
+#[benchmarks(where T: Config<KeyOwnerProof = MembershipProof>)]
+mod benchmarks {
+	use super::*;
 
-	// in this setup we have a single `ForInvalid` dispute
-	// submitted for a past session
-	report_dispute_lost {
-		let n in 4..<<T as super::Config>::BenchmarkingConfig as BenchmarkingConfiguration>::MAX_VALIDATORS;
-
-		let origin = RawOrigin::None.into();
+	#[benchmark]
+	fn report_dispute_lost_unsigned(n: Linear<4, { max_validators_for::<T>() }>) {
 		let (session_index, key_owner_proof, validator_id) = setup_validator_set::<T>(n);
+
+		// submit a single `ForInvalid` dispute for a past session.
 		let dispute_proof = setup_dispute::<T>(session_index, validator_id);
-	}: {
-		let result = Pallet::<T>::report_dispute_lost_unsigned(
-			origin,
-			Box::new(dispute_proof),
-			key_owner_proof,
-		);
-		assert!(result.is_ok());
-	} verify {
+
+		#[extrinsic_call]
+		_(RawOrigin::None, Box::new(dispute_proof), key_owner_proof);
+
 		let unapplied = <UnappliedSlashes<T>>::get(session_index, CANDIDATE_HASH);
 		assert!(unapplied.is_none());
 	}

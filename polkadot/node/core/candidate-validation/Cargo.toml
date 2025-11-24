@@ -1,38 +1,52 @@
 [package]
 name = "polkadot-node-core-candidate-validation"
 description = "Polkadot crate that implements the Candidate Validation subsystem. Handles requests to validate candidates according to a PVF."
-version = "7.0.0"
+version = "26.0.0"
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 
 [lints]
 workspace = true
 
 [dependencies]
-async-trait = "0.1.74"
-futures = "0.3.21"
-futures-timer = "3.0.2"
-gum = { package = "tracing-gum", path = "../../gum" }
+async-trait = { workspace = true }
+futures = { workspace = true }
+futures-timer = { workspace = true }
+gum.default-features = true
+gum.workspace = true
 
-sp-maybe-compressed-blob = { package = "sp-maybe-compressed-blob", path = "../../../../substrate/primitives/maybe-compressed-blob" }
-parity-scale-codec = { version = "3.6.1", default-features = false, features = ["bit-vec", "derive"] }
-
-polkadot-primitives = { path = "../../../primitives" }
-polkadot-parachain-primitives = { path = "../../../parachain" }
-polkadot-node-primitives = { path = "../../primitives" }
-polkadot-node-subsystem = { path = "../../subsystem" }
-polkadot-node-subsystem-util = { path = "../../subsystem-util" }
-polkadot-node-metrics = { path = "../../metrics" }
-polkadot-overseer = { path = "../../overseer" }
+codec = { features = ["bit-vec", "derive"], workspace = true }
+polkadot-node-metrics.default-features = true
+polkadot-node-metrics.workspace = true
+polkadot-node-primitives.default-features = true
+polkadot-node-primitives.workspace = true
+polkadot-node-subsystem.default-features = true
+polkadot-node-subsystem.workspace = true
+polkadot-node-subsystem-util.default-features = true
+polkadot-node-subsystem-util.workspace = true
+polkadot-overseer.default-features = true
+polkadot-overseer.workspace = true
+polkadot-parachain-primitives.default-features = true
+polkadot-parachain-primitives.workspace = true
+polkadot-primitives.default-features = true
+polkadot-primitives.workspace = true
+sp-application-crypto.workspace = true
+sp-keystore.workspace = true
 
 [target.'cfg(not(any(target_os = "android", target_os = "unknown")))'.dependencies]
-polkadot-node-core-pvf = { path = "../pvf" }
+polkadot-node-core-pvf.workspace = true
+polkadot-node-core-pvf.default-features = true
 
 [dev-dependencies]
-sp-keyring = { path = "../../../../substrate/primitives/keyring" }
-futures = { version = "0.3.21", features = ["thread-pool"] }
-assert_matches = "1.4.0"
-polkadot-node-subsystem-test-helpers = { path = "../../subsystem-test-helpers" }
-sp-core = { path = "../../../../substrate/primitives/core" }
-test-helpers = { package = "polkadot-primitives-test-helpers", path = "../../../primitives/test-helpers" }
+assert_matches = { workspace = true }
+futures = { features = ["thread-pool"], workspace = true }
+polkadot-node-subsystem-test-helpers = { workspace = true }
+polkadot-primitives = { features = ["test"], default-features = false, workspace = true }
+polkadot-primitives-test-helpers = { workspace = true }
+rstest = { workspace = true }
+sp-core = { default-features = true, workspace = true }
+sp-keyring = { default-features = true, workspace = true }
+sp-maybe-compressed-blob = { default-features = true, workspace = true }

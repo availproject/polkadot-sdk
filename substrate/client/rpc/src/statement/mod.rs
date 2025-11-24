@@ -19,10 +19,12 @@
 //! Substrate statement store API.
 
 use codec::{Decode, Encode};
-use jsonrpsee::core::{async_trait, RpcResult};
+use jsonrpsee::{
+	core::{async_trait, RpcResult},
+	Extensions,
+};
 /// Re-export the API for backward compatibility.
 pub use sc_rpc_api::statement::{error::Error, StatementApiServer};
-use sc_rpc_api::DenyUnsafe;
 use sp_core::Bytes;
 use sp_statement_store::{StatementSource, SubmitResult};
 use std::sync::Arc;
@@ -30,23 +32,19 @@ use std::sync::Arc;
 /// Statement store API
 pub struct StatementStore {
 	store: Arc<dyn sp_statement_store::StatementStore>,
-	deny_unsafe: DenyUnsafe,
 }
 
 impl StatementStore {
 	/// Create new instance of Offchain API.
-	pub fn new(
-		store: Arc<dyn sp_statement_store::StatementStore>,
-		deny_unsafe: DenyUnsafe,
-	) -> Self {
-		StatementStore { store, deny_unsafe }
+	pub fn new(store: Arc<dyn sp_statement_store::StatementStore>) -> Self {
+		StatementStore { store }
 	}
 }
 
 #[async_trait]
 impl StatementApiServer for StatementStore {
-	fn dump(&self) -> RpcResult<Vec<Bytes>> {
-		self.deny_unsafe.check_if_safe()?;
+	fn dump(&self, ext: &Extensions) -> RpcResult<Vec<Bytes>> {
+		sc_rpc_api::check_if_safe(ext)?;
 
 		let statements =
 			self.store.statements().map_err(|e| Error::StatementStore(e.to_string()))?;
@@ -87,9 +85,47 @@ impl StatementApiServer for StatementStore {
 			.collect())
 	}
 
+	fn broadcasts_stmt(&self, match_all_topics: Vec<[u8; 32]>) -> RpcResult<Vec<Bytes>> {
+		Ok(self
+			.store
+			.broadcasts_stmt(&match_all_topics)
+			.map_err(|e| Error::StatementStore(e.to_string()))?
+			.into_iter()
+			.map(Into::into)
+			.collect())
+	}
+
+	fn posted_stmt(
+		&self,
+		match_all_topics: Vec<[u8; 32]>,
+		dest: [u8; 32],
+	) -> RpcResult<Vec<Bytes>> {
+		Ok(self
+			.store
+			.posted_stmt(&match_all_topics, dest)
+			.map_err(|e| Error::StatementStore(e.to_string()))?
+			.into_iter()
+			.map(Into::into)
+			.collect())
+	}
+
+	fn posted_clear_stmt(
+		&self,
+		match_all_topics: Vec<[u8; 32]>,
+		dest: [u8; 32],
+	) -> RpcResult<Vec<Bytes>> {
+		Ok(self
+			.store
+			.posted_clear_stmt(&match_all_topics, dest)
+			.map_err(|e| Error::StatementStore(e.to_string()))?
+			.into_iter()
+			.map(Into::into)
+			.collect())
+	}
+
 	fn submit(&self, encoded: Bytes) -> RpcResult<()> {
 		let statement = Decode::decode(&mut &*encoded)
-			.map_err(|e| Error::StatementStore(format!("Eror decoding statement: {:?}", e)))?;
+			.map_err(|e| Error::StatementStore(format!("Error decoding statement: {:?}", e)))?;
 		match self.store.submit(statement, StatementSource::Local) {
 			SubmitResult::New(_) | SubmitResult::Known => Ok(()),
 			// `KnownExpired` should not happen. Expired statements submitted with

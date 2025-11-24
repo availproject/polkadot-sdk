@@ -39,7 +39,10 @@ fn universal_origin_should_work() {
 	);
 	assert_eq!(
 		r,
-		Outcome::Incomplete { used: Weight::from_parts(10, 10), error: XcmError::InvalidLocation }
+		Outcome::Incomplete {
+			used: Weight::from_parts(10, 10),
+			error: InstructionError { index: 0, error: XcmError::InvalidLocation },
+		}
 	);
 
 	let message = Xcm(vec![
@@ -56,7 +59,10 @@ fn universal_origin_should_work() {
 	);
 	assert_eq!(
 		r,
-		Outcome::Incomplete { used: Weight::from_parts(20, 20), error: XcmError::NotWithdrawable }
+		Outcome::Incomplete {
+			used: Weight::from_parts(20, 20),
+			error: InstructionError { index: 1, error: XcmError::NotWithdrawable },
+		}
 	);
 
 	add_asset((Ancestor(2), GlobalConsensus(Kusama)), (Parent, 100));
@@ -80,8 +86,8 @@ fn universal_origin_should_work() {
 fn export_message_should_work() {
 	// Bridge chain (assumed to be Relay) lets Parachain #1 have message execution for free.
 	AllowUnpaidFrom::set(vec![[Parachain(1)].into()]);
-	// Local parachain #1 issues a transfer asset on Polkadot Relay-chain, transfering 100 Planck to
-	// Polkadot parachain #2.
+	// Local parachain #1 issues a transfer asset on Polkadot Relay-chain, transferring 100 Planck
+	// to Polkadot parachain #2.
 	let expected_message = Xcm(vec![TransferAsset {
 		assets: (Here, 100u128).into(),
 		beneficiary: Parachain(2).into(),
@@ -130,7 +136,10 @@ fn unpaid_execution_should_work() {
 	);
 	assert_eq!(
 		r,
-		Outcome::Incomplete { used: Weight::from_parts(10, 10), error: XcmError::BadOrigin }
+		Outcome::Incomplete {
+			used: Weight::from_parts(10, 10),
+			error: InstructionError { index: 0, error: XcmError::BadOrigin },
+		}
 	);
 	let r = XcmExecutor::<TestConfig>::prepare_and_execute(
 		Parachain(2),
@@ -139,7 +148,13 @@ fn unpaid_execution_should_work() {
 		Weight::from_parts(50, 50),
 		Weight::zero(),
 	);
-	assert_eq!(r, Outcome::Error { error: XcmError::Barrier });
+	assert_eq!(
+		r,
+		Outcome::Incomplete {
+			used: Weight::from_parts(10, 10),
+			error: InstructionError { index: 0, error: XcmError::Barrier },
+		}
+	);
 
 	let message = Xcm(vec![UnpaidExecution {
 		weight_limit: Limited(Weight::from_parts(10, 10)),

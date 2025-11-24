@@ -1,4 +1,4 @@
-// This file is part of Substrate.
+// This file is part of Cumulus.
 
 // Copyright (C) Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
@@ -17,10 +17,7 @@
 
 #![cfg(test)]
 
-use frame_support::{
-	derive_impl, parameter_types,
-	traits::{HandleMessage, QueueFootprint},
-};
+use frame_support::{derive_impl, parameter_types, traits::HandleMessage};
 use sp_core::{bounded_vec::BoundedSlice, ConstU32};
 use sp_runtime::traits::IdentityLookup;
 
@@ -35,7 +32,7 @@ frame_support::construct_runtime!(
 	}
 );
 
-#[derive_impl(frame_system::config_preludes::TestDefaultConfig as frame_system::DefaultConfig)]
+#[derive_impl(frame_system::config_preludes::TestDefaultConfig)]
 impl frame_system::Config for Runtime {
 	type Block = Block;
 	type RuntimeOrigin = RuntimeOrigin;
@@ -70,10 +67,6 @@ impl HandleMessage for RecordingDmpSink {
 	}
 
 	fn sweep_queue() {
-		unimplemented!()
-	}
-
-	fn footprint() -> QueueFootprint {
 		unimplemented!()
 	}
 }

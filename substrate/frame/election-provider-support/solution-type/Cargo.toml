@@ -1,10 +1,10 @@
 [package]
 name = "frame-election-provider-solution-type"
-version = "13.0.0"
+version = "16.1.1"
 authors.workspace = true
 edition.workspace = true
 license = "Apache-2.0"
-homepage = "https://substrate.io"
+homepage.workspace = true
 repository.workspace = true
 description = "NPoS Solution Type"
 
@@ -18,16 +18,18 @@ targets = ["x86_64-unknown-linux-gnu"]
 proc-macro = true
 
 [dependencies]
-syn = { version = "2.0.48", features = ["full", "visit"] }
-quote = "1.0.28"
-proc-macro2 = "1.0.56"
-proc-macro-crate = "3.0.0"
+proc-macro-crate = { workspace = true }
+proc-macro2 = { workspace = true }
+quote = { workspace = true }
+syn = { features = ["full", "visit"], workspace = true }
 
 [dev-dependencies]
-parity-scale-codec = "3.6.1"
-scale-info = "2.10.0"
-sp-arithmetic = { path = "../../../primitives/arithmetic" }
+codec = { workspace = true, default-features = true }
+scale-info = { workspace = true, default-features = true }
+sp-arithmetic = { default-features = true, workspace = true }
 # used by generate_solution_type:
-frame-election-provider-support = { path = ".." }
-frame-support = { path = "../../support" }
-trybuild = "1.0.88"
+# NOTE: we have to explicitly specify `std` because of trybuild
+# https://github.com/paritytech/polkadot-sdk/pull/5167
+frame-election-provider-support = { default-features = true, features = ["std"], workspace = true }
+frame-support = { default-features = true, workspace = true }
+trybuild = { workspace = true }
