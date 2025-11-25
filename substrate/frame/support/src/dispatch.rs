@@ -154,7 +154,7 @@ pub trait CustomDispatchFee<T> {
 }
 
 /// Defines how the fees are getting modified.
-#[derive(Clone, Copy, Eq, PartialEq, Default, RuntimeDebug, Encode, Decode, TypeInfo, MaxEncodedLen)]
+#[derive(Clone, Copy, Eq, PartialEq, Default, RuntimeDebug, Encode, Decode, DecodeWithMemTracking, TypeInfo, MaxEncodedLen)]
 pub struct DispatchFeeModifier {
 	pub weight_maximum_fee: Option<u128>,
 	pub weight_fee_divider: Option<u32>,
