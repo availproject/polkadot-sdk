@@ -36,13 +36,13 @@ use crate::{
 	},
 };
 use clap::{error::ErrorKind, Args, CommandFactory, Parser};
-use codec::{Decode, Encode};
-use cumulus_client_parachain_inherent::MockValidationDataInherentDataProvider;
+use codec::Decode;
+// use cumulus_client_parachain_inherent::MockValidationDataInherentDataProvider;
 use fake_runtime_api::RuntimeApi as FakeRuntimeApi;
 use frame_support::Deserialize;
 use genesis_state::WARN_SPEC_GENESIS_CTOR;
 use log::info;
-use polkadot_parachain_primitives::primitives::Id as ParaId;
+// use polkadot_parachain_primitives::primitives::Id as ParaId;
 use sc_block_builder::BlockBuilderApi;
 use sc_chain_spec::{ChainSpec, ChainSpecExtension, GenesisBlockBuilder};
 use sc_cli::{CliConfiguration, Database, ImportParams, Result, SharedParams};
@@ -173,7 +173,7 @@ pub(crate) enum BenchmarkType {
 
 /// Hostfunctions that are typically used by parachains.
 pub type ParachainHostFunctions = (
-	cumulus_primitives_proof_size_hostfunction::storage_proof_size::HostFunctions,
+	// cumulus_primitives_proof_size_hostfunction::storage_proof_size::HostFunctions,
 	sp_io::SubstrateHostFunctions,
 );
 
@@ -195,41 +195,43 @@ type OverheadClient<Block, HF> = TFullClient<Block, FakeRuntimeApi, WasmExecutor
 /// inherents are required for every chain. The runtime will pick the ones
 /// it requires based on their identifier.
 fn create_inherent_data<Client: UsageProvider<Block> + HeaderBackend<Block>, Block: BlockT>(
-	client: &Arc<Client>,
-	chain_type: &ChainType,
+	_client: &Arc<Client>,
+	_chain_type: &ChainType,
 ) -> InherentData {
-	let genesis = client.usage_info().chain.best_hash;
-	let header = client.header(genesis).unwrap().unwrap();
+	// let genesis = client.usage_info().chain.best_hash;
+	// let header = client.header(genesis).unwrap().unwrap();
 
 	let mut inherent_data = InherentData::new();
 
 	// Para inherent can only makes sense when we are handling a parachain.
-	if let Parachain(para_id) = chain_type {
-		let parachain_validation_data_provider = MockValidationDataInherentDataProvider::<()> {
-			para_id: ParaId::from(*para_id),
-			current_para_block_head: Some(header.encode().into()),
-			relay_offset: 1,
-			..Default::default()
-		};
-		let _ = futures::executor::block_on(
-			parachain_validation_data_provider.provide_inherent_data(&mut inherent_data),
-		);
-	}
+	// NOTE: Disabling the para_inherent as we dont need this at Avail & it will unnecessary pull polkadot & parachain primitives
+	// if let Parachain(para_id) = chain_type {
+	// 	let parachain_validation_data_provider = MockValidationDataInherentDataProvider::<()> {
+	// 		para_id: ParaId::from(*para_id),
+	// 		current_para_block_head: Some(header.encode().into()),
+	// 		relay_offset: 1,
+	// 		..Default::default()
+	// 	};
+	// 	let _ = futures::executor::block_on(
+	// 		parachain_validation_data_provider.provide_inherent_data(&mut inherent_data),
+	// 	);
+	// }
 
 	// Parachain inherent that is used on relay chains to perform parachain validation.
-	let para_inherent = polkadot_primitives::InherentData {
-		bitfields: Vec::new(),
-		backed_candidates: Vec::new(),
-		disputes: Vec::new(),
-		parent_header: header,
-	};
+
+	// let para_inherent = polkadot_primitives::InherentData {
+	// 	bitfields: Vec::new(),
+	// 	backed_candidates: Vec::new(),
+	// 	disputes: Vec::new(),
+	// 	parent_header: header,
+	// };
 
 	// Timestamp inherent that is very common in substrate chains.
 	let timestamp = sp_timestamp::InherentDataProvider::new(std::time::Duration::default().into());
 
 	let _ = futures::executor::block_on(timestamp.provide_inherent_data(&mut inherent_data));
-	let _ =
-		inherent_data.put_data(polkadot_primitives::PARACHAINS_INHERENT_IDENTIFIER, &para_inherent);
+	// let _ =
+	// 	inherent_data.put_data(polkadot_primitives::PARACHAINS_INHERENT_IDENTIFIER, &para_inherent);
 
 	inherent_data
 }
@@ -704,20 +706,20 @@ mod tests {
 		assert_eq!(chain_type.requires_proof_recording(), false);
 	}
 
-	#[test]
-	fn test_chain_type_parachain() {
-		let executor: WasmExecutor<ParachainHostFunctions> = WasmExecutor::builder().build();
-		let code_bytes = cumulus_test_runtime::WASM_BINARY
-			.expect("To run this test, build the wasm binary of cumulus-test-runtime")
-			.to_vec();
-		let opaque_metadata =
-			super::fetch_latest_metadata_from_code_blob(&executor, code_bytes.into()).unwrap();
-		let metadata = subxt::Metadata::decode(&mut (*opaque_metadata).as_slice()).unwrap();
-		let chain_type = identify_chain(&metadata, Some(100));
-		assert_eq!(chain_type, ChainType::Parachain(100));
-		assert!(chain_type.requires_proof_recording());
-		assert_eq!(identify_chain(&metadata, None), ChainType::Parachain(DEFAULT_PARA_ID));
-	}
+	// #[test]
+	// fn test_chain_type_parachain() {
+	// 	let executor: WasmExecutor<ParachainHostFunctions> = WasmExecutor::builder().build();
+	// 	let code_bytes = cumulus_test_runtime::WASM_BINARY
+	// 		.expect("To run this test, build the wasm binary of cumulus-test-runtime")
+	// 		.to_vec();
+	// 	let opaque_metadata =
+	// 		super::fetch_latest_metadata_from_code_blob(&executor, code_bytes.into()).unwrap();
+	// 	let metadata = subxt::Metadata::decode(&mut (*opaque_metadata).as_slice()).unwrap();
+	// 	let chain_type = identify_chain(&metadata, Some(100));
+	// 	assert_eq!(chain_type, ChainType::Parachain(100));
+	// 	assert!(chain_type.requires_proof_recording());
+	// 	assert_eq!(identify_chain(&metadata, None), ChainType::Parachain(DEFAULT_PARA_ID));
+	// }
 
 	#[test]
 	fn test_chain_type_custom() {

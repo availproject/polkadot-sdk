@@ -54,6 +54,7 @@ mod benchmarks {
 			extension_weight: Weight::zero(),
 			class: DispatchClass::Normal,
 			pays_fee: Pays::No,
+			..Default::default()
 		};
 		let post_info = PostDispatchInfo { actual_weight: None, pays_fee: Pays::No };
 		#[block]
@@ -78,6 +79,7 @@ mod benchmarks {
 			extension_weight: Weight::zero(),
 			class: DispatchClass::Operational,
 			pays_fee: Pays::Yes,
+			..Default::default()
 		};
 		let post_info = PostDispatchInfo {
 			actual_weight: Some(Weight::from_parts(10, 0)),
@@ -110,6 +112,7 @@ mod benchmarks {
 			extension_weight: Weight::zero(),
 			class: DispatchClass::Operational,
 			pays_fee: Pays::Yes,
+			..Default::default()
 		};
 		let post_info = PostDispatchInfo {
 			actual_weight: Some(Weight::from_parts(10, 0)),

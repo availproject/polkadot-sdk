@@ -22,10 +22,10 @@ chrono = { workspace = true }
 clap = { features = ["derive"], workspace = true }
 codec = { workspace = true, default-features = true }
 comfy-table = { workspace = true }
-cumulus-client-parachain-inherent.default-features = true
-cumulus-client-parachain-inherent.workspace = true
-cumulus-primitives-proof-size-hostfunction.default-features = true
-cumulus-primitives-proof-size-hostfunction.workspace = true
+# cumulus-client-parachain-inherent.default-features = true
+# cumulus-client-parachain-inherent.workspace = true
+# cumulus-primitives-proof-size-hostfunction.default-features = true
+# cumulus-primitives-proof-size-hostfunction.workspace = true
 env_filter = { workspace = true }
 frame-benchmarking.default-features = true
 frame-benchmarking.workspace = true
@@ -40,10 +40,10 @@ handlebars = { workspace = true }
 itertools = { workspace = true }
 linked-hash-map = { workspace = true }
 log = { workspace = true, default-features = true }
-polkadot-parachain-primitives.default-features = true
-polkadot-parachain-primitives.workspace = true
-polkadot-primitives.default-features = true
-polkadot-primitives.workspace = true
+# polkadot-parachain-primitives.default-features = true
+# polkadot-parachain-primitives.workspace = true
+# polkadot-primitives.default-features = true
+# polkadot-primitives.workspace = true
 rand = { features = ["small_rng"], workspace = true, default-features = true }
 rand_pcg = { workspace = true }
 sc-block-builder.default-features = true
@@ -111,7 +111,7 @@ thiserror = { workspace = true }
 thousands = { workspace = true }
 
 [dev-dependencies]
-cumulus-test-runtime = { default-features = true, workspace = true }
+# cumulus-test-runtime = { default-features = true, workspace = true }
 substrate-test-runtime = { default-features = true, workspace = true }
 westend-runtime = { default-features = true, workspace = true }
 
@@ -122,8 +122,8 @@ runtime-benchmarks = [
 	"frame-storage-access-test-runtime/runtime-benchmarks",
 	"frame-support/runtime-benchmarks",
 	"frame-system/runtime-benchmarks",
-	"polkadot-parachain-primitives/runtime-benchmarks",
-	"polkadot-primitives/runtime-benchmarks",
+	# "polkadot-parachain-primitives/runtime-benchmarks",
+	# "polkadot-primitives/runtime-benchmarks",
 	"sc-client-db/runtime-benchmarks",
 	"sc-service/runtime-benchmarks",
 	"sp-runtime/runtime-benchmarks",

@@ -66,6 +66,7 @@ mod benchmarks {
 			extension_weight,
 			class: DispatchClass::Operational,
 			pays_fee: Pays::Yes,
+			..Default::default()
 		};
 		let mut post_info = PostDispatchInfo {
 			actual_weight: Some(Weight::from_parts(10, 0)),
