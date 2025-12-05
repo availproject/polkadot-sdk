@@ -27,15 +27,15 @@ use sp_core::storage::ChildInfo;
 use sp_runtime::traits;
 use sp_trie::StorageProof;
 
-#[cfg(all(not(feature = "std"), feature = "runtime-benchmarks"))]
-use {
-	cumulus_pallet_parachain_system::validate_block::{
-		trie_cache::CacheProvider, trie_recorder::SizeOnlyRecorderProvider,
-	},
-	sp_core::storage::StateVersion,
-	sp_runtime::{generic, OpaqueExtrinsic},
-	sp_state_machine::{Backend, TrieBackendBuilder},
-};
+// #[cfg(all(not(feature = "std"), feature = "runtime-benchmarks"))]
+// use {
+// 	cumulus_pallet_parachain_system::validate_block::{
+// 		trie_cache::CacheProvider, trie_recorder::SizeOnlyRecorderProvider,
+// 	},
+// 	sp_core::storage::StateVersion,
+// 	sp_runtime::{generic, OpaqueExtrinsic},
+// 	sp_state_machine::{Backend, TrieBackendBuilder},
+// };
 
 // Include the WASM binary
 #[cfg(feature = "std")]
@@ -103,58 +103,58 @@ impl<B: traits::Block> StorageAccessParams<B> {
 	}
 }
 
-/// Imitates `cumulus_pallet_parachain_system::validate_block::implementation::validate_block`
-///
-/// Only performs the storage access, this is used to benchmark the storage access cost.
-#[doc(hidden)]
-#[cfg(all(not(feature = "std"), feature = "runtime-benchmarks"))]
-pub fn proceed_storage_access<B: traits::Block>(mut params: &[u8]) {
-	let StorageAccessParams { state_root, storage_proof, payload, is_dry_run } =
-		StorageAccessParams::<B>::decode(&mut params)
-			.expect("Invalid arguments to `validate_block`.");
+// /// Imitates `cumulus_pallet_parachain_system::validate_block::implementation::validate_block`
+// ///
+// /// Only performs the storage access, this is used to benchmark the storage access cost.
+// #[doc(hidden)]
+// #[cfg(all(not(feature = "std"), feature = "runtime-benchmarks"))]
+// pub fn proceed_storage_access<B: traits::Block>(mut params: &[u8]) {
+// 	let StorageAccessParams { state_root, storage_proof, payload, is_dry_run } =
+// 		StorageAccessParams::<B>::decode(&mut params)
+// 			.expect("Invalid arguments to `validate_block`.");
 
-	let db = storage_proof.into_memory_db();
-	let recorder = SizeOnlyRecorderProvider::<traits::HashingFor<B>>::default();
-	let cache_provider = CacheProvider::new();
-	let backend = TrieBackendBuilder::new_with_cache(db, state_root, cache_provider)
-		.with_recorder(recorder)
-		.build();
+// 	let db = storage_proof.into_memory_db();
+// 	let recorder = SizeOnlyRecorderProvider::<traits::HashingFor<B>>::default();
+// 	let cache_provider = CacheProvider::new();
+// 	let backend = TrieBackendBuilder::new_with_cache(db, state_root, cache_provider)
+// 		.with_recorder(recorder)
+// 		.build();
 
-	if is_dry_run {
-		return;
-	}
+// 	if is_dry_run {
+// 		return;
+// 	}
 
-	match payload {
-		StorageAccessPayload::Read(keys) =>
-			for (key, maybe_child_info) in keys {
-				match maybe_child_info {
-					Some(child_info) => {
-						let _ = backend
-							.child_storage(&child_info, key.as_ref())
-							.expect("Key not found")
-							.ok_or("Value unexpectedly empty");
-					},
-					None => {
-						let _ = backend
-							.storage(key.as_ref())
-							.expect("Key not found")
-							.ok_or("Value unexpectedly empty");
-					},
-				}
-			},
-		StorageAccessPayload::Write((changes, maybe_child_info)) => {
-			let delta = changes.iter().map(|(key, value)| (key.as_ref(), Some(value.as_ref())));
-			match maybe_child_info {
-				Some(child_info) => {
-					backend.child_storage_root(&child_info, delta, StateVersion::V1);
-				},
-				None => {
-					backend.storage_root(delta, StateVersion::V1);
-				},
-			}
-		},
-	}
-}
+// 	match payload {
+// 		StorageAccessPayload::Read(keys) =>
+// 			for (key, maybe_child_info) in keys {
+// 				match maybe_child_info {
+// 					Some(child_info) => {
+// 						let _ = backend
+// 							.child_storage(&child_info, key.as_ref())
+// 							.expect("Key not found")
+// 							.ok_or("Value unexpectedly empty");
+// 					},
+// 					None => {
+// 						let _ = backend
+// 							.storage(key.as_ref())
+// 							.expect("Key not found")
+// 							.ok_or("Value unexpectedly empty");
+// 					},
+// 				}
+// 			},
+// 		StorageAccessPayload::Write((changes, maybe_child_info)) => {
+// 			let delta = changes.iter().map(|(key, value)| (key.as_ref(), Some(value.as_ref())));
+// 			match maybe_child_info {
+// 				Some(child_info) => {
+// 					backend.child_storage_root(&child_info, delta, StateVersion::V1);
+// 				},
+// 				None => {
+// 					backend.storage_root(delta, StateVersion::V1);
+// 				},
+// 			}
+// 		},
+// 	}
+// }
 
 /// Wasm binary unwrapped. If built with `SKIP_WASM_BUILD`, the function panics.
 #[cfg(feature = "std")]
@@ -171,11 +171,11 @@ pub fn oom(_: core::alloc::Layout) -> ! {
 	core::intrinsics::abort();
 }
 
-#[cfg(all(not(feature = "std"), feature = "runtime-benchmarks"))]
-#[no_mangle]
-pub extern "C" fn validate_block(params: *const u8, len: usize) -> u64 {
-	type Block = generic::Block<generic::Header<u32, traits::BlakeTwo256>, OpaqueExtrinsic>;
-	let params = unsafe { alloc::slice::from_raw_parts(params, len) };
-	proceed_storage_access::<Block>(params);
-	1
-}
+// #[cfg(all(not(feature = "std"), feature = "runtime-benchmarks"))]
+// #[no_mangle]
+// pub extern "C" fn validate_block(params: *const u8, len: usize) -> u64 {
+// 	type Block = generic::Block<generic::Header<u32, traits::BlakeTwo256>, OpaqueExtrinsic>;
+// 	let params = unsafe { alloc::slice::from_raw_parts(params, len) };
+// 	proceed_storage_access::<Block>(params);
+// 	1
+// }

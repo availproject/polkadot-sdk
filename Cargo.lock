@@ -6869,7 +6869,6 @@ dependencies = [
 name = "frame-storage-access-test-runtime"
 version = "0.4.0"
 dependencies = [
- "cumulus-pallet-parachain-system",
  "parity-scale-codec",
  "sp-core 38.1.0",
  "sp-runtime",
