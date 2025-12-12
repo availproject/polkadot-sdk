@@ -12880,15 +12880,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pallet-parachain-template"
-version = "0.1.0"
-dependencies = [
- "parity-scale-codec",
- "polkadot-sdk-frame",
- "scale-info",
-]
-
-[[package]]
 name = "pallet-parameters"
 version = "0.14.0"
 dependencies = [
@@ -14075,46 +14066,6 @@ dependencies = [
  "staging-xcm",
  "staging-xcm-builder",
  "tracing",
-]
-
-[[package]]
-name = "parachain-template"
-version = "0.1.0"
-dependencies = [
- "docify",
-]
-
-[[package]]
-name = "parachain-template-node"
-version = "0.1.0"
-dependencies = [
- "clap",
- "color-print",
- "docify",
- "futures",
- "jsonrpsee",
- "log",
- "parachain-template-runtime",
- "polkadot-sdk 2509.0.0",
- "serde",
- "substrate-prometheus-endpoint",
-]
-
-[[package]]
-name = "parachain-template-runtime"
-version = "0.1.0"
-dependencies = [
- "cumulus-pallet-parachain-system",
- "docify",
- "hex-literal",
- "log",
- "pallet-parachain-template",
- "parity-scale-codec",
- "polkadot-sdk 2509.0.0",
- "scale-info",
- "serde_json",
- "smallvec",
- "substrate-wasm-builder",
 ]
 
 [[package]]
@@ -22507,47 +22458,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "solochain-template-node"
-version = "0.1.0"
-dependencies = [
- "clap",
- "frame-benchmarking-cli",
- "frame-metadata-hash-extension",
- "frame-system",
- "futures",
- "jsonrpsee",
- "pallet-transaction-payment",
- "pallet-transaction-payment-rpc",
- "sc-basic-authorship",
- "sc-cli",
- "sc-client-api",
- "sc-consensus",
- "sc-consensus-aura",
- "sc-consensus-grandpa",
- "sc-executor",
- "sc-network",
- "sc-offchain",
- "sc-service",
- "sc-telemetry",
- "sc-transaction-pool",
- "sc-transaction-pool-api",
- "solochain-template-runtime",
- "sp-api",
- "sp-block-builder",
- "sp-blockchain",
- "sp-consensus-aura",
- "sp-core 38.1.0",
- "sp-genesis-builder",
- "sp-inherents",
- "sp-io",
- "sp-keyring",
- "sp-runtime",
- "sp-timestamp",
- "substrate-build-script-utils",
- "substrate-frame-rpc-system",
-]
-
-[[package]]
 name = "solochain-template-runtime"
 version = "0.1.0"
 dependencies = [
@@ -25223,16 +25133,6 @@ dependencies = [
  "once_cell",
  "rustix 0.38.42",
  "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "template-zombienet-tests"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "env_logger 0.11.3",
- "tokio",
- "zombienet-sdk",
 ]
 
 [[package]]
