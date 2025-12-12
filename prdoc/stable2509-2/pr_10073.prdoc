@@ -1,7 +1,0 @@
-title: Emit event for remove proxies extrinsic
-doc:
-- audience: Runtime Dev
-  description: 'Emits event for remote proxies extrinsic'
-crates:
-- name: pallet-proxy
-  bump: minor

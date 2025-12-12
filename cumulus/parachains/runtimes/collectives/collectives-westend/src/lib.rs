@@ -129,11 +129,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: alloc::borrow::Cow::Borrowed("collectives-westend"),
 	impl_name: alloc::borrow::Cow::Borrowed("collectives-westend"),
 	authoring_version: 1,
-<<<<<<< HEAD
-	spec_version: 1_007_000,
-=======
 	spec_version: 1_020_001,
->>>>>>> polkadot-v1.20.2
 	impl_version: 0,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 6,
@@ -791,10 +787,6 @@ type Migrations = (
 	pallet_collator_selection::migration::v2::MigrationToV2<Runtime>,
 	// unreleased
 	cumulus_pallet_xcmp_queue::migration::v4::MigrationToV4<Runtime>,
-<<<<<<< HEAD
-	// permanent
-	pallet_xcm::migration::MigrateToLatestXcmVersion<Runtime>,
-=======
 	cumulus_pallet_xcmp_queue::migration::v5::MigrateV4ToV5<Runtime>,
 	// permanent
 	pallet_xcm::migration::MigrateToLatestXcmVersion<Runtime>,
@@ -807,7 +799,6 @@ type Migrations = (
 		Runtime,
 		pallet_session::migrations::v1::InitOffenceSeverity<Runtime>,
 	>,
->>>>>>> polkadot-v1.20.2
 );
 
 /// Executive: handles dispatch to the various modules.

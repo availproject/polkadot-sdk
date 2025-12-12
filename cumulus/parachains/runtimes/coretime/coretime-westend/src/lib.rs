@@ -122,10 +122,6 @@ pub type UncheckedExtrinsic =
 
 /// Migrations to apply on runtime upgrade.
 pub type Migrations = (
-<<<<<<< HEAD
-	// permanent
-	pallet_xcm::migration::MigrateToLatestXcmVersion<Runtime>,
-=======
 	pallet_collator_selection::migration::v2::MigrationToV2<Runtime>,
 	cumulus_pallet_xcmp_queue::migration::v4::MigrationToV4<Runtime>,
 	cumulus_pallet_xcmp_queue::migration::v5::MigrateV4ToV5<Runtime>,
@@ -140,7 +136,6 @@ pub type Migrations = (
 	// permanent
 	pallet_xcm::migration::MigrateToLatestXcmVersion<Runtime>,
 	cumulus_pallet_aura_ext::migration::MigrateV0ToV1<Runtime>,
->>>>>>> polkadot-v1.20.2
 );
 
 /// Executive: handles dispatch to the various modules.
@@ -164,11 +159,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: alloc::borrow::Cow::Borrowed("coretime-westend"),
 	impl_name: alloc::borrow::Cow::Borrowed("coretime-westend"),
 	authoring_version: 1,
-<<<<<<< HEAD
-	spec_version: 1_007_000,
-=======
 	spec_version: 1_020_001,
->>>>>>> polkadot-v1.20.2
 	impl_version: 0,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 2,

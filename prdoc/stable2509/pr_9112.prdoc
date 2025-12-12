@@ -1,7 +1,0 @@
-title: Fix seal_call benchmark
-doc:
-- audience: Runtime Dev
-  description: Fix seal_call benchmark, ensure that the call actually succeed
-crates:
-- name: pallet-revive
-  bump: patch

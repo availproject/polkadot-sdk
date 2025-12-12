@@ -1,9 +1,0 @@
-title: Fix pallet-revive-fixtures build.rs
-doc:
-- audience: Runtime Dev
-  description: |-
-    Fix pallet-revive-uapi resolution when building pallet-revive-fixtures
-    contracts
-crates:
-- name: pallet-revive-fixtures
-  bump: patch

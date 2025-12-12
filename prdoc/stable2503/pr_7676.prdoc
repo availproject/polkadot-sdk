@@ -1,7 +1,0 @@
-title: '[pallet-revive] tracing should wrap around call stack execution'
-doc:
-- audience: Runtime Dev
-  description: Fix tracing should wrap around the entire call stack execution
-crates:
-- name: pallet-revive
-  bump: minor

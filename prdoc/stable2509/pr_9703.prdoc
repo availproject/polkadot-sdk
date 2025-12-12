@@ -1,7 +1,0 @@
-title: 'Cumulus: adjust authorship duration'
-doc:
-- audience: Node Dev
-  description: Adjust block authorship duration when a parachain uses more than 3 cores.
-crates:
-- name: cumulus-client-consensus-aura
-  bump: patch
