@@ -294,6 +294,7 @@ pub mod inflation;
 pub mod ledger;
 pub mod migrations;
 pub mod slashing;
+pub mod traits;
 pub mod weights;
 
 mod pallet;
@@ -370,7 +371,7 @@ pub struct ActiveEraInfo {
 	///
 	/// Start can be none if start hasn't been set for the era yet,
 	/// Start is set on the first on_finalize of the era to guarantee usage of `Time`.
-	start: Option<u64>,
+	pub start: Option<u64>,
 }
 
 /// Reward points of an era. Used to split era total payout between validators.
@@ -765,7 +766,7 @@ impl<AccountId, Balance: HasCompact + Copy + AtLeast32BitUnsigned + codec::MaxEn
 #[derive(Encode, Decode, RuntimeDebug, TypeInfo)]
 pub struct UnappliedSlash<AccountId, Balance: HasCompact> {
 	/// The stash ID of the offending validator.
-	validator: AccountId,
+	pub validator: AccountId,
 	/// The validator's own slash.
 	own: Balance,
 	/// All other slashed stakers and amounts.

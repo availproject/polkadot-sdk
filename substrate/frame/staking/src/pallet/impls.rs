@@ -51,8 +51,11 @@ use crate::{
 	election_size_tracker::StaticTracker, log, slashing, weights::WeightInfo, ActiveEraInfo,
 	BalanceOf, EraInfo, EraPayout, Exposure, ExposureOf, Forcing, IndividualExposure,
 	MaxNominationsOf, MaxWinnersOf, Nominations, NominationsQuota, PositiveImbalanceOf,
-	RewardDestination, SessionInterface, StakingLedger, ValidatorPrefs,
+	RewardDestination, SessionInterface, StakingLedger, traits::FusionExt, ValidatorPrefs,
 };
+
+// FUSION CHANGE
+// use pallet_fusion::FusionExt;
 
 use super::pallet::*;
 
@@ -336,7 +339,14 @@ impl<T: Config> Pallet<T> {
 		if amount.is_zero() {
 			return None
 		}
-		let dest = Self::payee(StakingAccount::Stash(stash.clone()))?;
+		// FUSION CHANGE
+		let dest = Self::payee(StakingAccount::Stash(stash.clone())).or_else(|| {
+			if T::FusionExt::get_pool_id_from_funds_account(stash).is_some() {
+				Some(RewardDestination::Account(stash.clone()))
+			} else {
+				None
+			}
+		})?;
 
 		let maybe_imbalance = match dest {
 			RewardDestination::Stash => T::Currency::deposit_into_existing(stash, amount).ok(),
@@ -492,6 +502,9 @@ impl<T: Config> Pallet<T> {
 		});
 
 		Self::apply_unapplied_slashes(active_era);
+
+		// FUSION CHANGE
+		T::FusionExt::set_fusion_exposures();
 	}
 
 	/// Compute payout for era.
@@ -502,8 +515,12 @@ impl<T: Config> Pallet<T> {
 
 			let era_duration = (now_as_millis_u64.defensive_saturating_sub(active_era_start))
 				.saturated_into::<u64>();
-			let staked = Self::eras_total_stake(&active_era.index);
+			let mut staked = Self::eras_total_stake(&active_era.index);
 			let issuance = T::Currency::total_issuance();
+			// FUSION CHANGE
+			if staked > issuance {
+				staked = issuance;
+			}
 			let (validator_payout, remainder) =
 				T::EraPayout::era_payout(staked, issuance, era_duration);
 
@@ -516,6 +533,9 @@ impl<T: Config> Pallet<T> {
 			// Set ending era reward.
 			<ErasValidatorReward<T>>::insert(&active_era.index, validator_payout);
 			T::RewardRemainder::on_unbalanced(T::Currency::issue(remainder));
+
+			// FUSION CHANGE
+			T::FusionExt::handle_end_era(active_era.index, era_duration);
 
 			// Clear offending validators.
 			<OffendingValidators<T>>::kill();
@@ -671,6 +691,10 @@ impl<T: Config> Pallet<T> {
 			T::CurrencyToVote::to_currency(e, total_issuance)
 		};
 
+		let active_era = ActiveEra::<T>::get()
+			.map(|era_info| era_info.index)
+			.unwrap_or(0);
+
 		supports
 			.into_iter()
 			.map(|(validator, support)| {
@@ -686,6 +710,11 @@ impl<T: Config> Pallet<T> {
 						if nominator == validator {
 							own = own.saturating_add(stake);
 						} else {
+							// FUSION CHANGE
+							// This will update the fusion exposure in case the nominator is a fusion pool.
+							let _ = T::FusionExt::update_pool_exposure(
+								&nominator, &validator, stake, active_era,
+							);
 							others.push(IndividualExposure { who: nominator, value: stake });
 						}
 						total = total.saturating_add(stake);
@@ -825,6 +854,14 @@ impl<T: Config> Pallet<T> {
 			bounds.count.unwrap_or(all_voter_count.into()).min(all_voter_count.into()).0
 		};
 
+		// FUSION CHANGE
+		// We account for the fusion voters count in the final_predicted_len.
+		// We do not update final_predicted_len as the next 'while' loop would have been unecessary longer.
+		let fusion_voters_count = T::FusionExt::get_active_pool_count()
+			.try_into()
+			.unwrap_or(u32::MIN);
+		let final_predicted_len = final_predicted_len.saturating_add(fusion_voters_count);
+
 		let mut all_voters = Vec::<_>::with_capacity(final_predicted_len as usize);
 
 		// cache a few things.
@@ -835,76 +872,107 @@ impl<T: Config> Pallet<T> {
 		let mut nominators_taken = 0u32;
 		let mut min_active_stake = u64::MAX;
 
-		let mut sorted_voters = T::VoterList::iter();
-		while all_voters.len() < final_predicted_len as usize &&
-			voters_seen < (NPOS_MAX_ITERATIONS_COEFFICIENT * final_predicted_len as u32)
-		{
-			let voter = match sorted_voters.next() {
-				Some(voter) => {
-					voters_seen.saturating_inc();
-					voter
-				},
-				None => break,
-			};
-
-			let voter_weight = weight_of(&voter);
-			// if voter weight is zero, do not consider this voter for the snapshot.
-			if voter_weight.is_zero() {
-				log!(debug, "voter's active balance is 0. skip this voter.");
-				continue
+		// FUSION CHANGE
+		let mut snapshot_voters_size_exceeded = false;
+		if fusion_voters_count > 0 {
+			let fusion_voters = T::FusionExt::get_fusion_voters();
+			for (account, value, targets) in fusion_voters.into_iter() {
+				let Ok(bounded_targets) = BoundedVec::try_from(targets) else {
+					log::error!("Failed to convert targets for account: {:?}", account);
+					continue;
+				};
+				let fusion_vote = (account, value, bounded_targets);
+				if voters_size_tracker
+					.try_register_voter(&fusion_vote, &bounds)
+					.is_err()
+				{
+					// No more space left for the election snapshot, stop iterating.
+					Self::deposit_event(Event::<T>::SnapshotVotersSizeExceeded {
+						size: voters_size_tracker.size as u32,
+					});
+					snapshot_voters_size_exceeded = true;
+					break;
+				}
+				all_voters.push(fusion_vote);
+				nominators_taken.saturating_inc();
+				if value < min_active_stake {
+					min_active_stake = value;
+				}
 			}
+		}
 
-			if let Some(Nominations { targets, .. }) = <Nominators<T>>::get(&voter) {
-				if !targets.is_empty() {
-					// Note on lazy nomination quota: we do not check the nomination quota of the
-					// voter at this point and accept all the current nominations. The nomination
-					// quota is only enforced at `nominate` time.
+		let mut sorted_voters = T::VoterList::iter();
+		if !snapshot_voters_size_exceeded {
+			while all_voters.len() < final_predicted_len as usize &&
+				voters_seen < (NPOS_MAX_ITERATIONS_COEFFICIENT * final_predicted_len as u32)
+			{
+				let voter = match sorted_voters.next() {
+					Some(voter) => {
+						voters_seen.saturating_inc();
+						voter
+					},
+					None => break,
+				};
 
-					let voter = (voter, voter_weight, targets);
-					if voters_size_tracker.try_register_voter(&voter, &bounds).is_err() {
-						// no more space left for the election result, stop iterating.
+				let voter_weight = weight_of(&voter);
+				// if voter weight is zero, do not consider this voter for the snapshot.
+				if voter_weight.is_zero() {
+					log!(debug, "voter's active balance is 0. skip this voter.");
+					continue
+				}
+
+				if let Some(Nominations { targets, .. }) = <Nominators<T>>::get(&voter) {
+					if !targets.is_empty() {
+						// Note on lazy nomination quota: we do not check the nomination quota of the
+						// voter at this point and accept all the current nominations. The nomination
+						// quota is only enforced at `nominate` time.
+
+						let voter = (voter, voter_weight, targets);
+						if voters_size_tracker.try_register_voter(&voter, &bounds).is_err() {
+							// no more space left for the election result, stop iterating.
+							Self::deposit_event(Event::<T>::SnapshotVotersSizeExceeded {
+								size: voters_size_tracker.size as u32,
+							});
+							break
+						}
+
+						all_voters.push(voter);
+						nominators_taken.saturating_inc();
+					} else {
+						// technically should never happen, but not much we can do about it.
+					}
+					min_active_stake =
+						if voter_weight < min_active_stake { voter_weight } else { min_active_stake };
+				} else if Validators::<T>::contains_key(&voter) {
+					// if this voter is a validator:
+					let self_vote = (
+						voter.clone(),
+						voter_weight,
+						vec![voter.clone()]
+							.try_into()
+							.expect("`MaxVotesPerVoter` must be greater than or equal to 1"),
+					);
+
+					if voters_size_tracker.try_register_voter(&self_vote, &bounds).is_err() {
+						// no more space left for the election snapshot, stop iterating.
 						Self::deposit_event(Event::<T>::SnapshotVotersSizeExceeded {
 							size: voters_size_tracker.size as u32,
 						});
 						break
 					}
-
-					all_voters.push(voter);
-					nominators_taken.saturating_inc();
+					all_voters.push(self_vote);
+					validators_taken.saturating_inc();
 				} else {
-					// technically should never happen, but not much we can do about it.
+					// this can only happen if: 1. there a bug in the bags-list (or whatever is the
+					// sorted list) logic and the state of the two pallets is no longer compatible, or
+					// because the nominators is not decodable since they have more nomination than
+					// `T::NominationsQuota::get_quota`. The latter can rarely happen, and is not
+					// really an emergency or bug if it does.
+					defensive!(
+						"DEFENSIVE: invalid item in `VoterList`: {:?}, this nominator probably has too many nominations now",
+						voter,
+					);
 				}
-				min_active_stake =
-					if voter_weight < min_active_stake { voter_weight } else { min_active_stake };
-			} else if Validators::<T>::contains_key(&voter) {
-				// if this voter is a validator:
-				let self_vote = (
-					voter.clone(),
-					voter_weight,
-					vec![voter.clone()]
-						.try_into()
-						.expect("`MaxVotesPerVoter` must be greater than or equal to 1"),
-				);
-
-				if voters_size_tracker.try_register_voter(&self_vote, &bounds).is_err() {
-					// no more space left for the election snapshot, stop iterating.
-					Self::deposit_event(Event::<T>::SnapshotVotersSizeExceeded {
-						size: voters_size_tracker.size as u32,
-					});
-					break
-				}
-				all_voters.push(self_vote);
-				validators_taken.saturating_inc();
-			} else {
-				// this can only happen if: 1. there a bug in the bags-list (or whatever is the
-				// sorted list) logic and the state of the two pallets is no longer compatible, or
-				// because the nominators is not decodable since they have more nomination than
-				// `T::NominationsQuota::get_quota`. The latter can rarely happen, and is not
-				// really an emergency or bug if it does.
-				defensive!(
-				    "DEFENSIVE: invalid item in `VoterList`: {:?}, this nominator probably has too many nominations now",
-                    voter,
-                );
 			}
 		}
 
@@ -1369,6 +1437,9 @@ where
 			consumed_weight += T::DbWeight::get().reads_writes(reads, writes);
 		};
 
+		// FUSION CHANGE
+		let mut fusion_weight = Weight::from_parts(0, 0);
+
 		let active_era = {
 			let active_era = Self::active_era();
 			add_db_reads_writes(1, 0);
@@ -1445,6 +1516,13 @@ where
 					add_db_reads_writes(rw, rw);
 				}
 				unapplied.reporters = details.reporters.clone();
+
+				// FUSION CHANGE
+				// We need to notify slashing in Fusion and record the funds, if needed.
+				// We need to do this so if the slash is applied manually, we find it
+				fusion_weight =
+					T::FusionExt::add_fusion_slash(slash_era, &stash, &unapplied.others);
+
 				if slash_defer_duration == 0 {
 					// Apply right away.
 					slashing::apply_slash::<T>(unapplied, slash_era);
@@ -1477,7 +1555,7 @@ where
 			}
 		}
 
-		consumed_weight
+		consumed_weight.saturating_add(fusion_weight)
 	}
 }
 

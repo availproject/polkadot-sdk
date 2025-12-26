@@ -51,7 +51,7 @@
 
 use crate::{
 	BalanceOf, Config, Error, Exposure, NegativeImbalanceOf, NominatorSlashInEra,
-	OffendingValidators, Pallet, Perbill, SessionInterface, SpanSlash, UnappliedSlash,
+	OffendingValidators, Pallet, Perbill, SessionInterface, SpanSlash, traits::FusionExt, UnappliedSlash,
 	ValidatorSlashInEra,
 };
 use codec::{Decode, Encode, MaxEncodedLen};
@@ -59,6 +59,7 @@ use frame_support::{
 	ensure,
 	traits::{Currency, Defensive, DefensiveSaturating, Get, Imbalance, OnUnbalanced},
 };
+// use pallet_fusion::FusionExt;
 use scale_info::TypeInfo;
 use sp_runtime::{
 	traits::{Saturating, Zero},
@@ -648,13 +649,18 @@ pub(crate) fn apply_slash<T: Config>(
 	);
 
 	for &(ref nominator, nominator_slash) in &unapplied_slash.others {
-		do_slash::<T>(
-			nominator,
-			nominator_slash,
-			&mut reward_payout,
-			&mut slashed_imbalance,
-			slash_era,
-		);
+		// FUSION CHANGE
+		let is_fusion_pool =
+			T::FusionExt::apply_fusion_slash(slash_era, &unapplied_slash.validator, nominator);
+		if !is_fusion_pool {
+			do_slash::<T>(
+				nominator,
+				nominator_slash,
+				&mut reward_payout,
+				&mut slashed_imbalance,
+				slash_era,
+			);
+		}
 	}
 
 	pay_reporters::<T>(reward_payout, slashed_imbalance, &unapplied_slash.reporters);
