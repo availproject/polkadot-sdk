@@ -325,6 +325,7 @@ pub async fn build_system_rpc_future<
 				let node_role = match role {
 					Role::Authority { .. } => NodeRole::Authority,
 					Role::Full => NodeRole::Full,
+					Role::LightClient => NodeRole::LightClient,
 				};
 
 				let _ = sender.send(vec![node_role]);

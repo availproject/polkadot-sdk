@@ -64,6 +64,8 @@ pub enum Role {
 	Full,
 	/// Actual authority.
 	Authority,
+	/// DA Light client.
+	LightClient,
 }
 
 impl Role {
@@ -78,6 +80,7 @@ impl std::fmt::Display for Role {
 		match self {
 			Self::Full => write!(f, "FULL"),
 			Self::Authority => write!(f, "AUTHORITY"),
+			Self::LightClient => write!(f, "LIGHT_CLIENT")
 		}
 	}
 }
@@ -118,6 +121,7 @@ impl<'a> From<&'a Role> for Roles {
 		match roles {
 			Role::Full => Self::FULL,
 			Role::Authority => Self::AUTHORITY,
+			Role::LightClient => Self::LIGHT,
 		}
 	}
 }

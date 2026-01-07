@@ -326,7 +326,7 @@ where
 			// dropped, the block will be unpinned automatically.
 			if let Some(ref notification) = finality_notification {
 				if let Err(err) = self.backend.pin_block(notification.hash) {
-					error!(
+					warn!(
 						"Unable to pin block for finality notification. hash: {}, Error: {}",
 						notification.hash, err
 					);
@@ -335,7 +335,7 @@ where
 
 			if let Some(ref notification) = import_notification {
 				if let Err(err) = self.backend.pin_block(notification.hash) {
-					error!(
+					warn!(
 						"Unable to pin block for import notification. hash: {}, Error: {}",
 						notification.hash, err
 					);
