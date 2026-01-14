@@ -42,7 +42,7 @@ use sc_executor::{
 };
 use sc_keystore::LocalKeystore;
 use sc_network::{
-	config::{FullNetworkConfiguration, SyncMode},
+	config::{FullNetworkConfiguration, Role, SyncMode},
 	peer_store::PeerStore,
 	NetworkService, NetworkStateInfo, NetworkStatusProvider,
 };
@@ -428,14 +428,17 @@ where
 	} = params;
 
 	let chain_info = client.usage_info().chain;
+	let is_light_client = matches!(config.role, Role::LightClient);
 
-	sp_session::generate_initial_session_keys(
-		client.clone(),
-		chain_info.best_hash,
-		config.dev_key_seed.clone().map(|s| vec![s]).unwrap_or_default(),
-		keystore.clone(),
-	)
-	.map_err(|e| Error::Application(Box::new(e)))?;
+	if !is_light_client {
+		sp_session::generate_initial_session_keys(
+			client.clone(),
+			chain_info.best_hash,
+			config.dev_key_seed.clone().map(|s| vec![s]).unwrap_or_default(),
+			keystore.clone(),
+		)
+		.map_err(|e| Error::Application(Box::new(e)))?;
+	}
 
 	let sysinfo = sc_sysinfo::gather_sysinfo();
 	sc_sysinfo::print_sysinfo(&sysinfo);
@@ -450,22 +453,24 @@ where
 
 	let spawn_handle = task_manager.spawn_handle();
 
-	// Inform the tx pool about imported and finalized blocks.
-	spawn_handle.spawn(
-		"txpool-notifications",
-		Some("transaction-pool"),
-		sc_transaction_pool::notification_future(client.clone(), transaction_pool.clone()),
-	);
+	if !is_light_client {
+		// Inform the tx pool about imported and finalized blocks.
+		spawn_handle.spawn(
+			"txpool-notifications",
+			Some("transaction-pool"),
+			sc_transaction_pool::notification_future(client.clone(), transaction_pool.clone()),
+		);
 
-	spawn_handle.spawn(
-		"on-transaction-imported",
-		Some("transaction-pool"),
-		transaction_notifications(
-			transaction_pool.clone(),
-			tx_handler_controller,
-			telemetry.clone(),
-		),
-	);
+		spawn_handle.spawn(
+			"on-transaction-imported",
+			Some("transaction-pool"),
+			transaction_notifications(
+				transaction_pool.clone(),
+				tx_handler_controller,
+				telemetry.clone(),
+			),
+		);
+	}
 
 	// Prometheus metrics.
 	let metrics_service =
@@ -495,7 +500,11 @@ where
 		),
 	);
 
-	let rpc_id_provider = config.rpc_id_provider.take();
+	let rpc_id_provider = if is_light_client {
+		None
+	} else {
+		config.rpc_id_provider.take()
+	};
 
 	// jsonrpsee RPC
 	let gen_rpc_module = |deny_unsafe: DenyUnsafe| {
@@ -512,7 +521,6 @@ where
 		)
 	};
 
-	let rpc = start_rpc_servers(&config, gen_rpc_module, rpc_id_provider)?;
 	let rpc_handlers = RpcHandlers(Arc::new(gen_rpc_module(sc_rpc::DenyUnsafe::No)?.into()));
 
 	// Spawn informant task
@@ -523,12 +531,16 @@ where
 			client.clone(),
 			network,
 			sync_service.clone(),
-			config.informant_output_format,
+			config.informant_output_format.clone(),
 		),
 	);
 
-	task_manager.keep_alive((config.base_path, rpc));
-
+	if !is_light_client {
+		let rpc = start_rpc_servers(&config, gen_rpc_module, rpc_id_provider)?;
+		task_manager.keep_alive((config.base_path, rpc));
+	} else {
+		task_manager.keep_alive(config.base_path);
+	}
 	Ok(rpc_handlers)
 }
 
