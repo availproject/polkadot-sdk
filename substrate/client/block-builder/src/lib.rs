@@ -29,15 +29,15 @@
 use codec::Encode;
 
 use sp_api::{
-	ApiExt, ApiRef, CallApiAt, Core, ProvideRuntimeApi, StorageChanges, StorageProof,
-	TransactionOutcome,
+	ApiExt, ApiRef, CallApiAt, Core, ProofRecorder, ProvideRuntimeApi, StorageChanges,
+	StorageProof, TransactionOutcome,
 };
 use sp_blockchain::{ApplyExtrinsicFailed, Error, HeaderBackend};
 use sp_core::traits::CallContext;
 use sp_runtime::{
 	legacy,
 	traits::{Block as BlockT, Hash, HashingFor, Header as HeaderT, NumberFor, One},
-	Digest,
+	Digest, ExtrinsicInclusionMode,
 };
 use std::marker::PhantomData;
 
@@ -99,7 +99,7 @@ where
 
 		Ok(BlockBuilderBuilderStage2 {
 			call_api_at: self.call_api_at,
-			enable_proof_recording: false,
+			proof_recorder: None,
 			inherent_digests: Default::default(),
 			parent_block: self.parent_block,
 			parent_number,
@@ -116,7 +116,7 @@ where
 	) -> BlockBuilderBuilderStage2<'a, B, C> {
 		BlockBuilderBuilderStage2 {
 			call_api_at: self.call_api_at,
-			enable_proof_recording: false,
+			proof_recorder: None,
 			inherent_digests: Default::default(),
 			parent_block: self.parent_block,
 			parent_number,
@@ -130,7 +130,7 @@ where
 /// [`BlockBuilderBuilder::new`] needs to be used.
 pub struct BlockBuilderBuilderStage2<'a, B: BlockT, C> {
 	call_api_at: &'a C,
-	enable_proof_recording: bool,
+	proof_recorder: Option<ProofRecorder<B>>,
 	inherent_digests: Digest,
 	parent_block: B::Hash,
 	parent_number: NumberFor<B>,
@@ -139,13 +139,19 @@ pub struct BlockBuilderBuilderStage2<'a, B: BlockT, C> {
 impl<'a, B: BlockT, C> BlockBuilderBuilderStage2<'a, B, C> {
 	/// Enable proof recording for the block builder.
 	pub fn enable_proof_recording(mut self) -> Self {
-		self.enable_proof_recording = true;
+		self.proof_recorder = Some(Default::default());
 		self
 	}
 
 	/// Enable/disable proof recording for the block builder.
 	pub fn with_proof_recording(mut self, enable: bool) -> Self {
-		self.enable_proof_recording = enable;
+		self.proof_recorder = enable.then(|| Default::default());
+		self
+	}
+
+	/// Enable/disable proof recording for the block builder using the given proof recorder.
+	pub fn with_proof_recorder(mut self, proof_recorder: Option<ProofRecorder<B>>) -> Self {
+		self.proof_recorder = proof_recorder;
 		self
 	}
 
@@ -165,7 +171,7 @@ impl<'a, B: BlockT, C> BlockBuilderBuilderStage2<'a, B, C> {
 			self.call_api_at,
 			self.parent_block,
 			self.parent_number,
-			self.enable_proof_recording,
+			self.proof_recorder,
 			self.inherent_digests,
 		)
 	}
@@ -198,10 +204,12 @@ pub struct BlockBuilder<'a, Block: BlockT, C: ProvideRuntimeApi<Block> + 'a> {
 	extrinsics: Vec<Block::Extrinsic>,
 	api: ApiRef<'a, C::Api>,
 	call_api_at: &'a C,
+	/// Version of the [`BlockBuilderApi`] runtime API.
 	version: u32,
 	parent_hash: Block::Hash,
 	/// The estimated size of the block header.
 	estimated_header_size: usize,
+	extrinsic_inclusion_mode: ExtrinsicInclusionMode,
 }
 
 impl<'a, Block, C> BlockBuilder<'a, Block, C>
@@ -219,7 +227,7 @@ where
 		call_api_at: &'a C,
 		parent_hash: Block::Hash,
 		parent_number: NumberFor<Block>,
-		record_proof: bool,
+		proof_recorder: Option<ProofRecorder<Block>>,
 		inherent_digests: Digest,
 	) -> Result<Self, Error> {
 		let header = <<Block as BlockT>::Header as HeaderT>::new(
@@ -234,19 +242,26 @@ where
 
 		let mut api = call_api_at.runtime_api();
 
-		if record_proof {
-			api.record_proof();
-			let recorder = api
-				.proof_recorder()
-				.expect("Proof recording is enabled in the line above; qed.");
+		if let Some(recorder) = proof_recorder {
+			api.record_proof_with_recorder(recorder.clone());
 			api.register_extension(ProofSizeExt::new(recorder));
 		}
 
 		api.set_call_context(CallContext::Onchain);
 
-		api.initialize_block(parent_hash, &header)?;
+		let core_version = api
+			.api_version::<dyn Core<Block>>(parent_hash)?
+			.ok_or_else(|| Error::VersionInvalid("Core".to_string()))?;
 
-		let version = api
+		let extrinsic_inclusion_mode = if core_version >= 5 {
+			api.initialize_block(parent_hash, &header)?
+		} else {
+			#[allow(deprecated)]
+			api.initialize_block_before_version_5(parent_hash, &header)?;
+			ExtrinsicInclusionMode::AllExtrinsics
+		};
+
+		let bb_version = api
 			.api_version::<dyn BlockBuilderApi<Block>>(parent_hash)?
 			.ok_or_else(|| Error::VersionInvalid("BlockBuilderApi".to_string()))?;
 
@@ -254,10 +269,16 @@ where
 			parent_hash,
 			extrinsics: Vec::new(),
 			api,
-			version,
+			version: bb_version,
 			estimated_header_size,
 			call_api_at,
+			extrinsic_inclusion_mode,
 		})
+	}
+
+	/// The extrinsic inclusion mode of the runtime for this block.
+	pub fn extrinsic_inclusion_mode(&self) -> ExtrinsicInclusionMode {
+		self.extrinsic_inclusion_mode
 	}
 
 	/// Push onto the block's list of extrinsics.
@@ -302,7 +323,7 @@ where
 			header.extrinsics_root().clone(),
 			HashingFor::<Block>::ordered_trie_root(
 				self.extrinsics.iter().map(Encode::encode).collect(),
-				sp_runtime::StateVersion::V0,
+				self.api.version(self.parent_hash)?.extrinsics_root_state_version(),
 			),
 		);
 

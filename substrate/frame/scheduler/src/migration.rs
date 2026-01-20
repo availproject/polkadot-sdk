@@ -19,7 +19,6 @@
 
 use super::*;
 use frame_support::traits::OnRuntimeUpgrade;
-use frame_system::pallet_prelude::BlockNumberFor;
 
 #[cfg(feature = "try-runtime")]
 use sp_runtime::TryRuntimeError;
@@ -194,7 +193,7 @@ pub mod v4 {
 	///
 	/// This should be run on a scheduler that does not have
 	/// <https://github.com/paritytech/substrate/pull/12989> since it piles up `None`-only agendas. This does not modify the pallet version.
-	pub struct CleanupAgendas<T>(sp_std::marker::PhantomData<T>);
+	pub struct CleanupAgendas<T>(core::marker::PhantomData<T>);
 
 	impl<T: Config> OnRuntimeUpgrade for CleanupAgendas<T> {
 		#[cfg(feature = "try-runtime")]
@@ -305,8 +304,8 @@ pub mod v4 {
 mod test {
 	use super::*;
 	use crate::mock::*;
+	use alloc::borrow::Cow;
 	use frame_support::Hashable;
-	use sp_std::borrow::Cow;
 	use substrate_test_utils::assert_eq_uvec;
 
 	#[test]

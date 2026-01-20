@@ -42,7 +42,7 @@ use crate::{
 	backend::{self, NewBlockState},
 	blockchain::{self, BlockStatus, HeaderBackend},
 	leaves::LeafSet,
-	UsageInfo,
+	TrieCacheContext, UsageInfo,
 };
 
 struct PendingBlock<B: BlockT> {
@@ -419,20 +419,6 @@ impl<Block: BlockT> blockchain::Backend<Block> for Blockchain<Block> {
 		Ok(self.storage.read().leaves.hashes())
 	}
 
-	fn displaced_leaves_after_finalizing(
-		&self,
-		block_number: NumberFor<Block>,
-	) -> sp_blockchain::Result<Vec<Block::Hash>> {
-		Ok(self
-			.storage
-			.read()
-			.leaves
-			.displaced_by_finalize_height(block_number)
-			.leaves()
-			.cloned()
-			.collect::<Vec<_>>())
-	}
-
 	fn children(&self, _parent_hash: Block::Hash) -> sp_blockchain::Result<Vec<Block::Hash>> {
 		unimplemented!()
 	}
@@ -598,6 +584,8 @@ impl<Block: BlockT> backend::BlockImportOperation<Block> for BlockImportOperatio
 	) -> sp_blockchain::Result<()> {
 		Ok(())
 	}
+
+	fn set_create_gap(&mut self, _create_gap: bool) {}
 }
 
 /// In-memory backend. Keeps all states and blocks in memory.
@@ -664,7 +652,7 @@ impl<Block: BlockT> backend::Backend<Block> for Backend<Block> {
 	type OffchainStorage = OffchainStorage;
 
 	fn begin_operation(&self) -> sp_blockchain::Result<Self::BlockImportOperation> {
-		let old_state = self.state_at(Default::default())?;
+		let old_state = self.state_at(Default::default(), TrieCacheContext::Untrusted)?;
 		Ok(BlockImportOperation {
 			pending_block: None,
 			old_state,
@@ -680,7 +668,7 @@ impl<Block: BlockT> backend::Backend<Block> for Backend<Block> {
 		operation: &mut Self::BlockImportOperation,
 		block: Block::Hash,
 	) -> sp_blockchain::Result<()> {
-		operation.old_state = self.state_at(block)?;
+		operation.old_state = self.state_at(block, TrieCacheContext::Untrusted)?;
 		Ok(())
 	}
 
@@ -746,7 +734,11 @@ impl<Block: BlockT> backend::Backend<Block> for Backend<Block> {
 		None
 	}
 
-	fn state_at(&self, hash: Block::Hash) -> sp_blockchain::Result<Self::State> {
+	fn state_at(
+		&self,
+		hash: Block::Hash,
+		_trie_cache_context: TrieCacheContext,
+	) -> sp_blockchain::Result<Self::State> {
 		if hash == Default::default() {
 			return Ok(Self::State::default())
 		}

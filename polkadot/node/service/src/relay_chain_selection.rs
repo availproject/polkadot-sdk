@@ -36,19 +36,19 @@
 #![cfg(feature = "full-node")]
 
 use super::{HeaderProvider, HeaderProviderProvider};
-use consensus_common::{Error as ConsensusError, SelectChain};
 use futures::channel::oneshot;
 use polkadot_node_primitives::MAX_FINALITY_LAG as PRIMITIVES_MAX_FINALITY_LAG;
 use polkadot_node_subsystem::messages::{
-	ApprovalDistributionMessage, ApprovalVotingMessage, ChainSelectionMessage,
-	DisputeCoordinatorMessage, HighestApprovedAncestorBlock,
+	ApprovalVotingParallelMessage, ChainSelectionMessage, DisputeCoordinatorMessage,
+	HighestApprovedAncestorBlock,
 };
 use polkadot_node_subsystem_util::metrics::{self, prometheus};
-use polkadot_overseer::{AllMessages, Handle};
+use polkadot_overseer::{AllMessages, Handle, PriorityLevel};
 use polkadot_primitives::{Block as PolkadotBlock, BlockNumber, Hash, Header as PolkadotHeader};
+use sp_consensus::{Error as ConsensusError, SelectChain};
 use std::sync::Arc;
 
-pub use service::SpawnTaskHandle;
+pub use sc_service::SpawnTaskHandle;
 
 /// The maximum amount of unfinalized blocks we are willing to allow due to approval checking
 /// or disputes.
@@ -235,7 +235,7 @@ pub struct SelectRelayChainInner<B, OH> {
 impl<B, OH> SelectRelayChainInner<B, OH>
 where
 	B: HeaderProviderProvider<PolkadotBlock>,
-	OH: OverseerHandleT,
+	OH: OverseerHandleT + OverseerHandleWithPriorityT,
 {
 	/// Create a new [`SelectRelayChainInner`] wrapping the given chain backend
 	/// and a handle to the overseer.
@@ -276,7 +276,7 @@ where
 impl<B, OH> Clone for SelectRelayChainInner<B, OH>
 where
 	B: HeaderProviderProvider<PolkadotBlock> + Send + Sync,
-	OH: OverseerHandleT,
+	OH: OverseerHandleT + OverseerHandleWithPriorityT,
 {
 	fn clone(&self) -> Self {
 		SelectRelayChainInner {
@@ -314,6 +314,17 @@ pub trait OverseerHandleT: Clone + Send + Sync {
 	async fn send_msg<M: Send + Into<AllMessages>>(&mut self, msg: M, origin: &'static str);
 }
 
+/// Trait for the overseer handle that allows sending messages with the specified priority level.
+#[async_trait::async_trait]
+pub trait OverseerHandleWithPriorityT: Clone + Send + Sync {
+	async fn send_msg_with_priority<M: Send + Into<AllMessages>>(
+		&mut self,
+		msg: M,
+		origin: &'static str,
+		priority: PriorityLevel,
+	);
+}
+
 #[async_trait::async_trait]
 impl OverseerHandleT for Handle {
 	async fn send_msg<M: Send + Into<AllMessages>>(&mut self, msg: M, origin: &'static str) {
@@ -321,10 +332,22 @@ impl OverseerHandleT for Handle {
 	}
 }
 
+#[async_trait::async_trait]
+impl OverseerHandleWithPriorityT for Handle {
+	async fn send_msg_with_priority<M: Send + Into<AllMessages>>(
+		&mut self,
+		msg: M,
+		origin: &'static str,
+		priority: PriorityLevel,
+	) {
+		Handle::send_msg_with_priority(self, msg, origin, priority).await
+	}
+}
+
 impl<B, OH> SelectRelayChainInner<B, OH>
 where
 	B: HeaderProviderProvider<PolkadotBlock>,
-	OH: OverseerHandleT + 'static,
+	OH: OverseerHandleT + OverseerHandleWithPriorityT + 'static,
 {
 	/// Get all leaves of the chain, i.e. block hashes that are suitable to
 	/// build upon and have no suitable children.
@@ -449,9 +472,14 @@ where
 		let (subchain_head, subchain_number, subchain_block_descriptions) = {
 			let (tx, rx) = oneshot::channel();
 			overseer
-				.send_msg(
-					ApprovalVotingMessage::ApprovedAncestor(subchain_head, target_number, tx),
+				.send_msg_with_priority(
+					ApprovalVotingParallelMessage::ApprovedAncestor(
+						subchain_head,
+						target_number,
+						tx,
+					),
 					std::any::type_name::<Self>(),
+					PriorityLevel::High,
 				)
 				.await;
 
@@ -472,15 +500,16 @@ where
 		let lag = initial_leaf_number.saturating_sub(subchain_number);
 		self.metrics.note_approval_checking_finality_lag(lag);
 
-		// Messages sent to `approval-distrbution` are known to have high `ToF`, we need to spawn a
+		// Messages sent to `approval-distribution` are known to have high `ToF`, we need to spawn a
 		// task for sending the message to not block here and delay finality.
 		if let Some(spawn_handle) = &self.spawn_handle {
 			let mut overseer_handle = self.overseer.clone();
 			let lag_update_task = async move {
 				overseer_handle
-					.send_msg(
-						ApprovalDistributionMessage::ApprovalCheckingLagUpdate(lag),
+					.send_msg_with_priority(
+						ApprovalVotingParallelMessage::ApprovalCheckingLagUpdate(lag),
 						std::any::type_name::<Self>(),
+						PriorityLevel::High,
 					)
 					.await;
 			};
@@ -509,13 +538,14 @@ where
 			// 3. Constrain according to disputes:
 			let (tx, rx) = oneshot::channel();
 			overseer
-				.send_msg(
+				.send_msg_with_priority(
 					DisputeCoordinatorMessage::DetermineUndisputedChain {
 						base: (target_number, target_hash),
 						block_descriptions: subchain_block_descriptions,
 						tx,
 					},
 					std::any::type_name::<Self>(),
+					PriorityLevel::High,
 				)
 				.await;
 
@@ -524,7 +554,7 @@ where
 			// and not push it up the stack to cause additional issues in GRANDPA/BABE.
 			let (lag, subchain_head) =
 				match rx.await.map_err(Error::DetermineUndisputedChainCanceled) {
-					// If request succeded we will receive (block number, block hash).
+					// If request succeeded we will receive (block number, block hash).
 					Ok((subchain_number, subchain_head)) => {
 						// The total lag accounting for disputes.
 						let lag_disputes = initial_leaf_number.saturating_sub(subchain_number);
