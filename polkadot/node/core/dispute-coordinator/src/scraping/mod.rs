@@ -28,8 +28,9 @@ use polkadot_node_subsystem_util::runtime::{
 	self, get_candidate_events, get_on_chain_votes, get_unapplied_slashes,
 };
 use polkadot_primitives::{
-	slashing::PendingSlashes, BlockNumber, CandidateEvent, CandidateHash, CandidateReceipt, Hash,
-	ScrapedOnChainVotes, SessionIndex,
+	slashing::PendingSlashes,
+	vstaging::{CandidateEvent, CandidateReceiptV2 as CandidateReceipt, ScrapedOnChainVotes},
+	BlockNumber, CandidateHash, Hash, SessionIndex,
 };
 
 use crate::{
@@ -49,7 +50,10 @@ mod candidates;
 /// `last_observed_blocks` LRU. This means, this value should the very least be as large as the
 /// number of expected forks for keeping chain scraping efficient. Making the LRU much larger than
 /// that has very limited use.
-const LRU_OBSERVED_BLOCKS_CAPACITY: u32 = 20;
+/// In cases of high load when finality lags, forks could appear anywhere from the last finalized
+/// block to best, hence this number needs to be large enough to hold all the hashes from best to
+/// finalized.
+const LRU_OBSERVED_BLOCKS_CAPACITY: u32 = 2 * MAX_FINALITY_LAG;
 
 /// `ScrapedUpdates`
 ///
@@ -121,7 +125,7 @@ impl Inclusions {
 				Entry::Vacant(_) => {
 					// Rare case where same candidate was present on multiple heights, but all are
 					// pruned at the same time. This candidate was already pruned in the previous
-					// occurence so it is skipped now.
+					// occurrence so it is skipped now.
 				},
 				Entry::Occupied(mut e) => {
 					let mut blocks_including = std::mem::take(e.get_mut());

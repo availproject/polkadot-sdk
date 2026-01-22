@@ -34,7 +34,7 @@ pub enum ApplyExtrinsicFailed {
 	/// The transaction cannot be included into the current block.
 	///
 	/// This doesn't necessary mean that the transaction itself is invalid, but it might be just
-	/// unappliable onto the current block.
+	/// unapplicable onto the current block.
 	#[error("Extrinsic is not valid: {0:?}")]
 	Validity(#[from] TransactionValidityError),
 
@@ -101,6 +101,9 @@ pub enum Error {
 
 	#[error("bad justification for header: {0}")]
 	BadJustification(String),
+
+	#[error("outdated justification")]
+	OutdatedJustification,
 
 	#[error("This method is not currently available when running in light client mode")]
 	NotAvailableOnLightClient,

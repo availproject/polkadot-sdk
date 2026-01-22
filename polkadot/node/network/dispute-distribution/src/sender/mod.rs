@@ -15,7 +15,7 @@
 // along with Polkadot.  If not, see <http://www.gnu.org/licenses/>.
 
 use std::{
-	collections::{HashMap, HashSet},
+	collections::{BTreeMap, HashMap, HashSet},
 	pin::Pin,
 	task::Poll,
 	time::Duration,
@@ -57,7 +57,7 @@ pub enum DisputeSenderMessage {
 	/// A task finished.
 	TaskFinish(TaskFinish),
 	/// A request for active disputes to the dispute-coordinator finished.
-	ActiveDisputesReady(JfyiErrorResult<Vec<(SessionIndex, CandidateHash, DisputeStatus)>>),
+	ActiveDisputesReady(JfyiErrorResult<BTreeMap<(SessionIndex, CandidateHash), DisputeStatus>>),
 }
 
 /// The `DisputeSender` keeps track of all ongoing disputes we need to send statements out.
@@ -76,7 +76,7 @@ pub struct DisputeSender<M> {
 	/// Value is the hash that was used for the query.
 	active_sessions: HashMap<SessionIndex, Hash>,
 
-	/// All ongoing dispute sendings this subsystem is aware of.
+	/// All ongoing dispute sending this subsystem is aware of.
 	///
 	/// Using an `IndexMap` so items can be iterated in the order of insertion.
 	disputes: IndexMap<CandidateHash, SendTask<M>>,
@@ -105,7 +105,7 @@ struct WaitForActiveDisputesState {
 
 #[overseer::contextbounds(DisputeDistribution, prefix = self::overseer)]
 impl<M: 'static + Send + Sync> DisputeSender<M> {
-	/// Create a new `DisputeSender` which can be used to start dispute sendings.
+	/// Create a new `DisputeSender` which can be used to start dispute sending.
 	pub fn new(tx: NestingSender<M, DisputeSenderMessage>, metrics: Metrics) -> Self {
 		Self {
 			active_heads: Vec::new(),
@@ -255,10 +255,11 @@ impl<M: 'static + Send + Sync> DisputeSender<M> {
 		&mut self,
 		ctx: &mut Context,
 		runtime: &mut RuntimeInfo,
-		active_disputes: Vec<(SessionIndex, CandidateHash, DisputeStatus)>,
+		active_disputes: BTreeMap<(SessionIndex, CandidateHash), DisputeStatus>,
 		have_new_sessions: bool,
 	) -> Result<()> {
-		let active_disputes: HashSet<_> = active_disputes.into_iter().map(|(_, c, _)| c).collect();
+		let active_disputes: HashSet<_> =
+			active_disputes.into_iter().map(|((_, c), _)| c).collect();
 
 		// Cleanup obsolete senders (retain keeps order of remaining elements):
 		self.disputes
@@ -362,7 +363,7 @@ async fn get_active_session_indices<Context>(
 	runtime: &mut RuntimeInfo,
 	active_heads: &Vec<Hash>,
 ) -> Result<HashMap<SessionIndex, Hash>> {
-	let mut indeces = HashMap::new();
+	let mut indices = HashMap::new();
 	// Iterate all heads we track as active and fetch the child' session indices.
 	for head in active_heads {
 		let session_index = runtime.get_session_index_for_child(ctx.sender(), *head).await?;
@@ -372,15 +373,15 @@ async fn get_active_session_indices<Context>(
 		{
 			gum::debug!(target: LOG_TARGET, ?err, ?session_index, "Can't cache SessionInfo");
 		}
-		indeces.insert(session_index, *head);
+		indices.insert(session_index, *head);
 	}
-	Ok(indeces)
+	Ok(indices)
 }
 
 /// Retrieve Set of active disputes from the dispute coordinator.
 async fn get_active_disputes<Sender>(
 	sender: &mut Sender,
-) -> JfyiErrorResult<Vec<(SessionIndex, CandidateHash, DisputeStatus)>>
+) -> JfyiErrorResult<BTreeMap<(SessionIndex, CandidateHash), DisputeStatus>>
 where
 	Sender: SubsystemSender<DisputeCoordinatorMessage>,
 {

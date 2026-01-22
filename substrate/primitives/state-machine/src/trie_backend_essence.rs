@@ -23,20 +23,21 @@ use crate::{
 	trie_backend::TrieCacheProvider,
 	warn, StorageKey, StorageValue,
 };
+#[cfg(feature = "std")]
+use alloc::sync::Arc;
+use alloc::{boxed::Box, vec::Vec};
 use codec::Codec;
+use core::marker::PhantomData;
 use hash_db::{self, AsHashDB, HashDB, HashDBRef, Hasher, Prefix};
 #[cfg(feature = "std")]
 use parking_lot::RwLock;
 use sp_core::storage::{ChildInfo, ChildType, StateVersion};
-#[cfg(feature = "std")]
-use sp_std::sync::Arc;
-use sp_std::{boxed::Box, marker::PhantomData, vec::Vec};
 use sp_trie::{
 	child_delta_trie_root, delta_trie_root, empty_child_trie_root,
-	read_child_trie_first_descedant_value, read_child_trie_hash, read_child_trie_value,
-	read_trie_first_descedant_value, read_trie_value,
+	read_child_trie_first_descendant_value, read_child_trie_hash, read_child_trie_value,
+	read_trie_first_descendant_value, read_trie_value,
 	trie_types::{TrieDBBuilder, TrieError},
-	DBValue, KeySpacedDB, MerkleValue, NodeCodec, PrefixedMemoryDB, Trie, TrieCache,
+	DBValue, KeySpacedDB, MerkleValue, NodeCodec, PrefixedMemoryDB, RandomState, Trie, TrieCache,
 	TrieDBRawIterator, TrieRecorder, TrieRecorderProvider,
 };
 #[cfg(feature = "std")]
@@ -55,7 +56,7 @@ macro_rules! format {
 	};
 }
 
-type Result<V> = sp_std::result::Result<V, crate::DefaultError>;
+type Result<V> = core::result::Result<V, crate::DefaultError>;
 
 /// Patricia trie-based storage trait.
 pub trait Storage<H: Hasher>: Send + Sync {
@@ -553,7 +554,7 @@ where
 		let map_e = |e| format!("Trie lookup error: {}", e);
 
 		self.with_recorder_and_cache(None, |recorder, cache| {
-			read_trie_first_descedant_value::<Layout<H>, _>(self, &self.root, key, recorder, cache)
+			read_trie_first_descendant_value::<Layout<H>, _>(self, &self.root, key, recorder, cache)
 				.map_err(map_e)
 		})
 	}
@@ -569,7 +570,7 @@ where
 		let map_e = |e| format!("Trie lookup error: {}", e);
 
 		self.with_recorder_and_cache(Some(child_root), |recorder, cache| {
-			read_child_trie_first_descedant_value::<Layout<H>, _>(
+			read_child_trie_first_descendant_value::<Layout<H>, _>(
 				child_info.keyspace(),
 				self,
 				&child_root,
@@ -630,7 +631,7 @@ where
 		delta: impl Iterator<Item = (&'a [u8], Option<&'a [u8]>)>,
 		state_version: StateVersion,
 	) -> (H::Out, PrefixedMemoryDB<H>) {
-		let mut write_overlay = PrefixedMemoryDB::default();
+		let mut write_overlay = PrefixedMemoryDB::with_hasher(RandomState::default());
 
 		let root = self.with_recorder_and_cache_for_storage_root(None, |recorder, cache| {
 			let mut eph = Ephemeral::new(self.backend_storage(), &mut write_overlay);
@@ -666,7 +667,7 @@ where
 		let default_root = match child_info.child_type() {
 			ChildType::ParentKeyId => empty_child_trie_root::<sp_trie::LayoutV1<H>>(),
 		};
-		let mut write_overlay = PrefixedMemoryDB::default();
+		let mut write_overlay = PrefixedMemoryDB::with_hasher(RandomState::default());
 		let child_root = match self.child_root(child_info) {
 			Ok(Some(hash)) => hash,
 			Ok(None) => default_root,

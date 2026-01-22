@@ -19,7 +19,8 @@
 
 #![cfg(test)]
 
-use crate::mock::{build_ext_and_execute_test, Aura, MockDisabledValidators, System};
+use super::pallet;
+use crate::mock::{build_ext_and_execute_test, Aura, MockDisabledValidators, System, Test};
 use codec::Encode;
 use frame_support::traits::OnInitialize;
 use sp_consensus_aura::{Slot, AURA_ENGINE_ID};
@@ -28,8 +29,8 @@ use sp_runtime::{Digest, DigestItem};
 #[test]
 fn initial_values() {
 	build_ext_and_execute_test(vec![0, 1, 2, 3], || {
-		assert_eq!(Aura::current_slot(), 0u64);
-		assert_eq!(Aura::authorities().len(), Aura::authorities_len());
+		assert_eq!(pallet::CurrentSlot::<Test>::get(), 0u64);
+		assert_eq!(pallet::Authorities::<Test>::get().len(), Aura::authorities_len());
 		assert_eq!(Aura::authorities_len(), 4);
 	});
 }
@@ -46,13 +47,13 @@ fn disabled_validators_cannot_author_blocks() {
 			Digest { logs: vec![DigestItem::PreRuntime(AURA_ENGINE_ID, slot.encode())] };
 
 		System::reset_events();
-		System::initialize(&42, &System::parent_hash(), &pre_digest);
+		System::initialize(&1, &System::parent_hash(), &pre_digest);
 
 		// let's disable the validator
 		MockDisabledValidators::disable_validator(1);
 
 		// and we should not be able to initialize the block
-		Aura::on_initialize(42);
+		Aura::on_initialize(1);
 	});
 }
 
@@ -67,11 +68,11 @@ fn pallet_requires_slot_to_increase_unless_allowed() {
 			Digest { logs: vec![DigestItem::PreRuntime(AURA_ENGINE_ID, slot.encode())] };
 
 		System::reset_events();
-		System::initialize(&42, &System::parent_hash(), &pre_digest);
+		System::initialize(&1, &System::parent_hash(), &pre_digest);
 
 		// and we should not be able to initialize the block with the same slot a second time.
-		Aura::on_initialize(42);
-		Aura::on_initialize(42);
+		Aura::on_initialize(1);
+		Aura::on_initialize(1);
 	});
 }
 
@@ -83,13 +84,13 @@ fn pallet_can_allow_unchanged_slot() {
 			Digest { logs: vec![DigestItem::PreRuntime(AURA_ENGINE_ID, slot.encode())] };
 
 		System::reset_events();
-		System::initialize(&42, &System::parent_hash(), &pre_digest);
+		System::initialize(&1, &System::parent_hash(), &pre_digest);
 
 		crate::mock::AllowMultipleBlocksPerSlot::set(true);
 
 		// and we should be able to initialize the block with the same slot a second time.
-		Aura::on_initialize(42);
-		Aura::on_initialize(42);
+		Aura::on_initialize(1);
+		Aura::on_initialize(1);
 	});
 }
 
@@ -102,17 +103,17 @@ fn pallet_always_rejects_decreasing_slot() {
 			Digest { logs: vec![DigestItem::PreRuntime(AURA_ENGINE_ID, slot.encode())] };
 
 		System::reset_events();
-		System::initialize(&42, &System::parent_hash(), &pre_digest);
+		System::initialize(&1, &System::parent_hash(), &pre_digest);
 
 		crate::mock::AllowMultipleBlocksPerSlot::set(true);
 
-		Aura::on_initialize(42);
+		Aura::on_initialize(1);
 		System::finalize();
 
 		let earlier_slot = Slot::from(1);
 		let pre_digest =
 			Digest { logs: vec![DigestItem::PreRuntime(AURA_ENGINE_ID, earlier_slot.encode())] };
-		System::initialize(&43, &System::parent_hash(), &pre_digest);
-		Aura::on_initialize(43);
+		System::initialize(&2, &System::parent_hash(), &pre_digest);
+		Aura::on_initialize(2);
 	});
 }

@@ -17,7 +17,7 @@
 
 //! # Root Testing Pallet
 //!
-//! Pallet that contains extrinsics that can be usefull in testing.
+//! Pallet that contains extrinsics that can be useful in testing.
 //!
 //! NOTE: This pallet should only be used for testing purposes and should not be used in production
 //! runtimes!
@@ -37,6 +37,7 @@ pub mod pallet {
 	#[pallet::config]
 	pub trait Config: frame_system::Config {
 		/// The overarching event type.
+		#[allow(deprecated)]
 		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
 	}
 

@@ -18,7 +18,7 @@
 //! > Made with *Substrate*, for *Polkadot*.
 //!
 //! [![github]](https://github.com/paritytech/polkadot-sdk/tree/master/substrate/frame/fast-unstake) -
-//! [![polkadot]](https://polkadot.network)
+//! [![polkadot]](https://polkadot.com)
 //!
 //! [polkadot]: https://img.shields.io/badge/polkadot-E6007A?style=for-the-badge&logo=polkadot&logoColor=white
 //! [github]: https://img.shields.io/badge/github-8da0cb?style=for-the-badge&labelColor=555555&logo=github
@@ -39,7 +39,7 @@
 //! *Being exposed with validator* from the point of view of the staking system means earning
 //! rewards with the validator, and also being at the risk of slashing with the validator. This is
 //! equivalent to the "Active Nominator" role explained in
-//! [here](https://polkadot.network/blog/staking-update-february-2022/).
+//! [here](https://polkadot.com/blog/staking-update-february-2022/).
 //!
 //! Stakers who are certain about NOT being exposed can register themselves with
 //! [`Pallet::register_fast_unstake`]. This will chill, fully unbond the staker and place them
@@ -112,6 +112,8 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
+extern crate alloc;
+
 pub use pallet::*;
 
 #[cfg(test)]
@@ -141,7 +143,7 @@ macro_rules! log {
 	($level:tt, $patter:expr $(, $values:expr)* $(,)?) => {
 		log::$level!(
 			target: crate::LOG_TARGET,
-			concat!("[{:?}] 💨 ", $patter), <frame_system::Pallet<T>>::block_number() $(, $values)*
+			concat!("[{:?}] 💨 ", $patter), frame_system::Pallet::<T>::block_number() $(, $values)*
 		)
 	};
 }
@@ -150,6 +152,7 @@ macro_rules! log {
 pub mod pallet {
 	use super::*;
 	use crate::types::*;
+	use alloc::vec::Vec;
 	use frame_support::{
 		pallet_prelude::*,
 		traits::{Defensive, ReservableCurrency, StorageVersion},
@@ -157,7 +160,6 @@ pub mod pallet {
 	use frame_system::pallet_prelude::*;
 	use sp_runtime::{traits::Zero, DispatchResult};
 	use sp_staking::{EraIndex, StakingInterface};
-	use sp_std::{prelude::*, vec::Vec};
 	pub use weights::WeightInfo;
 
 	#[cfg(feature = "try-runtime")]
@@ -172,6 +174,7 @@ pub mod pallet {
 	#[pallet::config]
 	pub trait Config: frame_system::Config {
 		/// The overarching event type.
+		#[allow(deprecated)]
 		type RuntimeEvent: From<Event<Self>>
 			+ IsType<<Self as frame_system::Config>::RuntimeEvent>
 			+ TryInto<Event<Self>>;
@@ -227,7 +230,6 @@ pub mod pallet {
 	/// checked. The checking is represented by updating [`UnstakeRequest::checked`], which is
 	/// stored in [`Head`].
 	#[pallet::storage]
-	#[pallet::getter(fn eras_to_check_per_block)]
 	pub type ErasToCheckPerBlock<T: Config> = StorageValue<_, u32, ValueQuery>;
 
 	#[pallet::event]
@@ -332,7 +334,7 @@ pub mod pallet {
 		pub fn register_fast_unstake(origin: OriginFor<T>) -> DispatchResult {
 			let ctrl = ensure_signed(origin)?;
 
-			ensure!(ErasToCheckPerBlock::<T>::get() != 0, <Error<T>>::CallNotAllowed);
+			ensure!(ErasToCheckPerBlock::<T>::get() != 0, Error::<T>::CallNotAllowed);
 			let stash_account =
 				T::Staking::stash_by_ctrl(&ctrl).map_err(|_| Error::<T>::NotController)?;
 			ensure!(!Queue::<T>::contains_key(&stash_account), Error::<T>::AlreadyQueued);
@@ -373,7 +375,7 @@ pub mod pallet {
 		pub fn deregister(origin: OriginFor<T>) -> DispatchResult {
 			let ctrl = ensure_signed(origin)?;
 
-			ensure!(ErasToCheckPerBlock::<T>::get() != 0, <Error<T>>::CallNotAllowed);
+			ensure!(ErasToCheckPerBlock::<T>::get() != 0, Error::<T>::CallNotAllowed);
 
 			let stash_account =
 				T::Staking::stash_by_ctrl(&ctrl).map_err(|_| Error::<T>::NotController)?;
@@ -407,7 +409,7 @@ pub mod pallet {
 		#[pallet::call_index(2)]
 		#[pallet::weight(<T as Config>::WeightInfo::control())]
 		pub fn control(origin: OriginFor<T>, eras_to_check: EraIndex) -> DispatchResult {
-			let _ = T::ControlOrigin::ensure_origin(origin)?;
+			T::ControlOrigin::ensure_origin(origin)?;
 			ensure!(eras_to_check <= T::MaxErasToCheckPerBlock::get(), Error::<T>::CallNotAllowed);
 			ErasToCheckPerBlock::<T>::put(eras_to_check);
 			Ok(())
@@ -560,7 +562,7 @@ pub mod pallet {
 				if !remaining.is_zero() {
 					Self::halt("not enough balance to unreserve");
 				} else {
-					log!(info, "unstaked {:?}, outcome: {:?}", stash, result);
+					log!(debug, "unstaked {:?}, outcome: {:?}", stash, result);
 					Self::deposit_event(Event::<T>::Unstaked { stash, result });
 				}
 			};

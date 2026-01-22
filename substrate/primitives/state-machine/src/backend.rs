@@ -23,14 +23,14 @@ use crate::{
 	trie_backend_essence::TrieBackendStorage, ChildStorageCollection, StorageCollection,
 	StorageKey, StorageValue, UsageInfo,
 };
+use alloc::vec::Vec;
 use codec::Encode;
 use core::marker::PhantomData;
 use hash_db::Hasher;
 use sp_core::storage::{ChildInfo, StateVersion, TrackedStorageKey};
 #[cfg(feature = "std")]
 use sp_core::traits::RuntimeCode;
-use sp_std::vec::Vec;
-use sp_trie::{MerkleValue, PrefixedMemoryDB};
+use sp_trie::{MerkleValue, PrefixedMemoryDB, RandomState};
 
 /// A struct containing arguments for iterating over the storage.
 #[derive(Default)]
@@ -179,7 +179,7 @@ pub type BackendTransaction<H> = PrefixedMemoryDB<H>;
 /// to it.
 ///
 /// The clone operation (if implemented) should be cheap.
-pub trait Backend<H: Hasher>: sp_std::fmt::Debug {
+pub trait Backend<H: Hasher>: core::fmt::Debug {
 	/// An error type when fetching data is not possible.
 	type Error: super::Error;
 
@@ -301,7 +301,7 @@ pub trait Backend<H: Hasher>: sp_std::fmt::Debug {
 	where
 		H::Out: Ord + Encode,
 	{
-		let mut txs = BackendTransaction::default();
+		let mut txs = BackendTransaction::with_hasher(RandomState::default());
 		let mut child_roots: Vec<_> = Default::default();
 		// child first
 		for (child_info, child_delta) in child_deltas {
