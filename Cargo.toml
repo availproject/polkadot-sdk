@@ -574,12 +574,7 @@ members = [
 	"umbrella",
 ]
 
-default-members = [
-	"cumulus/polkadot-omni-node",
-	"cumulus/polkadot-parachain",
-	"polkadot",
-	"substrate/bin/node/cli",
-]
+default-members = ["substrate/bin/node/cli"]
 
 [workspace.lints.rust]
 suspicious_double_ref_op = { level = "allow", priority = 2 }

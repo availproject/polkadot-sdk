@@ -508,14 +508,17 @@ where
 	} = params;
 
 	let chain_info = client.usage_info().chain;
+	let is_light_client = matches!(config.role, Role::LightClient);
 
-	sp_session::generate_initial_session_keys(
-		client.clone(),
-		chain_info.best_hash,
-		config.dev_key_seed.clone().map(|s| vec![s]).unwrap_or_default(),
-		keystore.clone(),
-	)
-	.map_err(|e| Error::Application(Box::new(e)))?;
+	if !is_light_client {
+		sp_session::generate_initial_session_keys(
+			client.clone(),
+			chain_info.best_hash,
+			config.dev_key_seed.clone().map(|s| vec![s]).unwrap_or_default(),
+			keystore.clone(),
+		)
+		.map_err(|e| Error::Application(Box::new(e)))?;
+	}
 
 	let sysinfo = sc_sysinfo::gather_sysinfo();
 	sc_sysinfo::print_sysinfo(&sysinfo);
@@ -540,22 +543,24 @@ where
 
 	let spawn_handle = task_manager.spawn_handle();
 
-	// Inform the tx pool about imported and finalized blocks.
-	spawn_handle.spawn(
-		"txpool-notifications",
-		Some("transaction-pool"),
-		sc_transaction_pool::notification_future(client.clone(), transaction_pool.clone()),
-	);
+	if !is_light_client {
+		// Inform the tx pool about imported and finalized blocks.
+		spawn_handle.spawn(
+			"txpool-notifications",
+			Some("transaction-pool"),
+			sc_transaction_pool::notification_future(client.clone(), transaction_pool.clone()),
+		);
 
-	spawn_handle.spawn(
-		"on-transaction-imported",
-		Some("transaction-pool"),
-		propagate_transaction_notifications(
-			transaction_pool.clone(),
-			tx_handler_controller,
-			telemetry.clone(),
-		),
-	);
+		spawn_handle.spawn(
+			"on-transaction-imported",
+			Some("transaction-pool"),
+			propagate_transaction_notifications(
+				transaction_pool.clone(),
+				tx_handler_controller,
+				telemetry.clone(),
+			),
+		);
+	}
 
 	// Prometheus metrics.
 	let metrics_service =
@@ -591,7 +596,11 @@ where
 		),
 	);
 
-	let rpc_id_provider = config.rpc.id_provider.take();
+	let rpc_id_provider = if is_light_client {
+		None
+	} else {
+		config.rpc.id_provider.take()
+	};
 
 	// jsonrpsee RPC
 	// RPC-V2 specific metrics need to be registered before the RPC server is started,
@@ -620,31 +629,13 @@ where
 		)
 	};
 
-	let rpc_server_handle = start_rpc_servers(
-		&config.rpc,
-		config.prometheus_registry(),
-		&config.tokio_handle,
-		gen_rpc_module,
-		rpc_id_provider,
-	)?;
-
-	let listen_addrs = rpc_server_handle
-		.listen_addrs()
-		.into_iter()
-		.map(|socket_addr| {
-			let mut multiaddr: Multiaddr = socket_addr.ip().into();
-			multiaddr.push(Protocol::Tcp(socket_addr.port()));
-			multiaddr
-		})
-		.collect();
-
 	let in_memory_rpc = {
 		let mut module = gen_rpc_module()?;
 		module.extensions_mut().insert(DenyUnsafe::No);
 		module
 	};
 
-	let in_memory_rpc_handle = RpcHandlers::new(Arc::new(in_memory_rpc), listen_addrs);
+
 
 	// Spawn informant task
 	spawn_handle.spawn(
@@ -653,7 +644,28 @@ where
 		sc_informant::build(client.clone(), network, sync_service.clone()),
 	);
 
-	task_manager.keep_alive((config.base_path, rpc_server_handle));
+	let mut listen_addrs = Vec::new();
+	if !is_light_client {
+		let rpc = start_rpc_servers(&config.rpc,
+		config.prometheus_registry(),
+		&config.tokio_handle,
+		gen_rpc_module,
+		rpc_id_provider)?;
+		listen_addrs = rpc
+		.listen_addrs()
+		.into_iter()
+		.map(|socket_addr| {
+			let mut multiaddr: Multiaddr = socket_addr.ip().into();
+			multiaddr.push(Protocol::Tcp(socket_addr.port()));
+			multiaddr
+		})
+		.collect();
+		task_manager.keep_alive((config.base_path, rpc));
+
+	} else {
+		task_manager.keep_alive(config.base_path);
+	}
+	let in_memory_rpc_handle = RpcHandlers::new(Arc::new(in_memory_rpc), listen_addrs);
 
 	Ok(in_memory_rpc_handle)
 }

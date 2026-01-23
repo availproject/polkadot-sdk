@@ -78,6 +78,8 @@ pub enum NodeRole {
 	Full,
 	/// The node is an authority
 	Authority,
+	/// The DA light client node
+	LightClient,
 }
 
 /// The state of the syncing of the node.

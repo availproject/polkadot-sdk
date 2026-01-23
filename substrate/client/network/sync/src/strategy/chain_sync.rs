@@ -1561,8 +1561,9 @@ where
 			ChainSyncMode::Full => {
 				BlockAttributes::HEADER | BlockAttributes::JUSTIFICATION | BlockAttributes::BODY
 			},
+			// temp: to be used by the DA lc
 			ChainSyncMode::LightState { storage_chain_mode: false, .. } => {
-				BlockAttributes::HEADER | BlockAttributes::JUSTIFICATION | BlockAttributes::BODY
+				BlockAttributes::HEADER | BlockAttributes::JUSTIFICATION
 			},
 			ChainSyncMode::LightState { storage_chain_mode: true, .. } => {
 				BlockAttributes::HEADER

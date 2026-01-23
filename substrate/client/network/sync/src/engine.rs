@@ -86,8 +86,7 @@ const TICK_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1100)
 const MAX_KNOWN_BLOCKS: usize = 1024; // ~32kb per peer + LruHashSet overhead
 
 /// Maximum allowed size for a block announce.
-/// More than enough to support a block size of upto 64 MiB
-const MAX_BLOCK_ANNOUNCE_SIZE: u64 = 1024 * 1024;
+const MAX_BLOCK_ANNOUNCE_SIZE: u64 = 128 * 1024 * 1024;
 
 mod rep {
 	use sc_network::ReputationChange as Rep;

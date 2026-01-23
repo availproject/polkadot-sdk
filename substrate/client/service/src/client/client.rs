@@ -18,6 +18,7 @@
 
 //! Substrate Client
 
+use futures::{FutureExt, StreamExt};
 use super::{
 	block_rules::{BlockRules, LookupResult as BlockLookupResult},
 	CodeProvider,

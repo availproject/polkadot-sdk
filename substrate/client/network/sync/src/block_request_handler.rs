@@ -90,8 +90,8 @@ pub fn generate_protocol_config<
 	N::request_response_config(
 		generate_protocol_name(genesis_hash, fork_id).into(),
 		std::iter::once(generate_legacy_protocol_name(protocol_id).into()).collect(),
-		1024 * 1024,
-		MAX_RESPONSE_SIZE,
+		4 * 1024 * 1024,
+		128 * 1024 * 1024,
 		Duration::from_secs(20),
 		Some(inbound_queue),
 	)
