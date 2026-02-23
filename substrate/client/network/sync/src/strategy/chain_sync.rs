@@ -784,7 +784,12 @@ where
 			is_descendent_of(&**client, base, block)
 		});
 
-		if let ChainSyncMode::LightState { skip_proofs, .. } = &self.mode {
+		if let ChainSyncMode::LightState { skip_proofs, storage_chain_mode } = &self.mode {
+			// DA light-client mode (`storage_chain_mode = false`) intentionally avoids state sync.
+			if !*storage_chain_mode {
+				return
+			}
+
 			if self.state_sync.is_none() {
 				if !self.peers.is_empty() && self.queue_blocks.is_empty() {
 					self.attempt_state_sync(*hash, number, *skip_proofs);
@@ -1724,7 +1729,9 @@ where
 		let info = self.client.info();
 		debug!(target: LOG_TARGET, "Restarting sync with client info {info:?}");
 
-		if matches!(self.mode, ChainSyncMode::LightState { .. }) && info.finalized_state.is_some() {
+		if matches!(self.mode, ChainSyncMode::LightState { storage_chain_mode: true, .. }) &&
+			info.finalized_state.is_some()
+		{
 			warn!(
 				target: LOG_TARGET,
 				"Can't use fast sync mode with a partially synced database. Reverting to full sync mode."
