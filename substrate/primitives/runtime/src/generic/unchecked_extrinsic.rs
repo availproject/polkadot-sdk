@@ -63,7 +63,7 @@ pub const LEGACY_EXTRINSIC_FORMAT_VERSION: ExtrinsicVersion = 4;
 const EXTENSION_VERSION: ExtensionVersion = 0;
 
 /// Maximum decoded heap size for a runtime call (in bytes).
-pub const DEFAULT_MAX_CALL_SIZE: usize = 16 * 1024 * 1024; // 16 MiB
+pub const DEFAULT_MAX_CALL_SIZE: usize = 64 * 1024 * 1024; // 64 MiB
 
 /// The `SignaturePayload` of `UncheckedExtrinsic`.
 pub type UncheckedSignaturePayload<Address, Signature, Extension> = (Address, Signature, Extension);
