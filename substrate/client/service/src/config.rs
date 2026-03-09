@@ -225,7 +225,10 @@ impl Configuration {
 	/// Returns true if the genesis state writing will be skipped while initializing the genesis
 	/// block.
 	pub fn no_genesis(&self) -> bool {
-		matches!(self.network.sync_mode, SyncMode::LightState { .. } | SyncMode::Warp { .. })
+		matches!(
+			self.network.sync_mode,
+			SyncMode::LightState { .. } | SyncMode::Warp | SyncMode::DaWarp
+		)
 	}
 
 	/// Returns the database config for creating the backend.

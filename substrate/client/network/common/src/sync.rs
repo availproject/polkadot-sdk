@@ -34,12 +34,14 @@ pub enum SyncMode {
 	},
 	/// Warp sync - verify authority set transitions and the latest state.
 	Warp,
+	/// Warp sync for DA light clients - verify authority set transitions and skip state sync.
+	DaWarp,
 }
 
 impl SyncMode {
 	/// Returns `true` if `self` is [`Self::Warp`].
 	pub fn is_warp(&self) -> bool {
-		matches!(self, Self::Warp)
+		matches!(self, Self::Warp | Self::DaWarp)
 	}
 
 	/// Returns `true` if `self` is [`Self::LightState`].

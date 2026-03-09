@@ -50,6 +50,10 @@ fn chain_sync_mode(sync_mode: SyncMode) -> ChainSyncMode {
 		SyncMode::LightState { skip_proofs, storage_chain_mode } =>
 			ChainSyncMode::LightState { skip_proofs, storage_chain_mode },
 		SyncMode::Warp => ChainSyncMode::Full,
+		SyncMode::DaWarp => ChainSyncMode::LightState {
+			skip_proofs: false,
+			storage_chain_mode: false,
+		},
 	}
 }
 
@@ -354,7 +358,7 @@ where
 			config.max_blocks_per_request = MAX_BLOCKS_IN_RESPONSE as u32;
 		}
 
-		if let SyncMode::Warp = config.mode {
+		if matches!(config.mode, SyncMode::Warp | SyncMode::DaWarp) {
 			let warp_sync_config = warp_sync_config
 				.expect("Warp sync configuration must be supplied in warp sync mode.");
 			let warp_sync = WarpSync::new(
@@ -400,6 +404,31 @@ where
 		if let Some(ref mut warp) = self.warp {
 			match warp.take_result() {
 				Some(res) => {
+					if matches!(self.config.mode, SyncMode::DaWarp) {
+						info!(
+							target: LOG_TARGET,
+							"Warp sync is complete, skipping state sync and continuing with block sync."
+						);
+						let chain_sync = ChainSync::new(
+							chain_sync_mode(self.config.mode),
+							self.client.clone(),
+							self.config.max_parallel_downloads,
+							self.config.max_blocks_per_request,
+							self.config.state_request_protocol_name.clone(),
+							self.config.block_downloader.clone(),
+							self.config.metrics_registry.as_ref(),
+							self.peer_best_blocks
+								.iter()
+								.map(|(peer_id, (best_hash, best_number))| {
+									(*peer_id, *best_hash, *best_number)
+								}),
+						)?;
+
+						self.warp = None;
+						self.chain_sync = Some(chain_sync);
+						return Ok(())
+					}
+
 					info!(
 						target: LOG_TARGET,
 						"Warp sync is complete, continuing with state sync."
