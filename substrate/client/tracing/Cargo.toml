@@ -52,6 +52,12 @@ thiserror = { workspace = true }
 tracing = { workspace = true, default-features = true }
 tracing-log = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter", "parking_lot"] }
+opentelemetry = { version = "0.31", default-features = true }
+opentelemetry-appender-tracing = { version = "0.31", default-features = true }
+opentelemetry-otlp = { version = "0.31", default-features = true }
+opentelemetry-semantic-conventions = { version = "0.31", default-features = true }
+opentelemetry_sdk = { version = "0.31", default-features = true }
+tracing-opentelemetry = { version = "0.32", default-features = true }
 
 [dev-dependencies]
 criterion = { workspace = true, default-features = true }

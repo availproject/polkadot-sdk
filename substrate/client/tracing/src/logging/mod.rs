@@ -46,6 +46,9 @@ use tracing_subscriber::{
 	registry::LookupSpan,
 	EnvFilter, FmtSubscriber, Layer, Registry,
 };
+use opentelemetry_sdk::logs::SdkLoggerProvider;
+use opentelemetry_sdk::metrics::SdkMeterProvider;
+use opentelemetry_sdk::trace::SdkTracerProvider;
 
 pub use event_format::*;
 pub use fast_local_time::FastLocalTime;
@@ -196,19 +199,51 @@ where
 		display_thread_name: detailed_output,
 		dup_to_stdout: !io::stderr().is_terminal() && io::stdout().is_terminal(),
 	};
+
 	let builder = FmtSubscriber::builder().with_env_filter(env_filter);
-
 	let builder = builder.with_span_events(format::FmtSpan::NONE);
-
 	let builder = builder.with_writer(MakeStderrWriter::default());
-
 	let builder = builder.event_format(event_format);
-
 	let builder = builder_hook(builder);
 
 	let subscriber = builder.finish().with(PrefixLayer);
 
 	Ok(subscriber)
+}
+
+/// Otel Builder
+#[derive(Default)]
+pub struct LoggerOtel {
+	tracer_provider: Option<(SdkTracerProvider, opentelemetry_sdk::trace::Tracer)>,
+	meter_provider: Option<SdkMeterProvider>,
+	logger_provider: Option<SdkLoggerProvider>,
+}
+
+/// Otel Builder
+#[derive(Default)]
+pub struct OtelGuards {
+    pub tracer: Option<SdkTracerProvider>,
+    pub meter: Option<SdkMeterProvider>,
+    pub logger: Option<SdkLoggerProvider>,
+}
+
+impl Drop for OtelGuards {
+    fn drop(&mut self) {
+		use std::time::Duration;
+
+		if let Some(tracer) = &self.tracer {
+			_ = tracer.force_flush();
+			_ = tracer.shutdown_with_timeout(Duration::from_millis(100));
+		}
+		if let Some(meter) = &self.meter {
+			_ = meter.force_flush();
+			_ = meter.shutdown_with_timeout(Duration::from_millis(100));
+		}
+		if let Some(logger) = &self.logger {
+			_ = logger.force_flush();
+			_ = logger.shutdown_with_timeout(Duration::from_millis(100));
+		}
+    }
 }
 
 /// A builder that is used to initialize the global logger.
@@ -219,6 +254,7 @@ pub struct LoggerBuilder {
 	log_reloading: bool,
 	force_colors: Option<bool>,
 	detailed_output: bool,
+	otel: LoggerOtel,
 }
 
 impl LoggerBuilder {
@@ -231,6 +267,7 @@ impl LoggerBuilder {
 			log_reloading: false,
 			force_colors: None,
 			detailed_output: false,
+			otel: LoggerOtel::default(),
 		}
 	}
 
@@ -241,6 +278,15 @@ impl LoggerBuilder {
 		profiling_targets: S,
 	) -> &mut Self {
 		self.profiling = Some((tracing_receiver, profiling_targets.into()));
+		self
+	}
+
+	/// Add custom otel.
+	pub fn with_otel(
+		&mut self,
+		value: LoggerOtel,
+	) -> &mut Self {
+		self.otel = value;
 		self
 	}
 
@@ -279,7 +325,9 @@ impl LoggerBuilder {
 	/// Initialize the global logger
 	///
 	/// This sets various global logging and tracing instances and thus may only be called once.
-	pub fn init(self) -> Result<()> {
+	pub fn init(self) -> Result<OtelGuards> {
+		let mut otel_guards = OtelGuards::default();
+
 		if let Some((tracing_receiver, profiling_targets)) = self.profiling {
 			if self.log_reloading {
 				let subscriber = prepare_subscriber(
@@ -296,9 +344,24 @@ impl LoggerBuilder {
 					.into_iter()
 					.for_each(|profiler| profiling.add_handler(profiler));
 
-				tracing::subscriber::set_global_default(subscriber.with(profiling))?;
-
-				Ok(())
+				
+				let mut layers = vec![];
+				if let Some((provider, tracer)) = self.otel.tracer_provider {
+					opentelemetry::global::set_tracer_provider(provider.clone());
+					layers.push(tracing_opentelemetry::layer().with_tracer(tracer).boxed());
+					otel_guards.tracer = Some(provider);
+				}
+				if let Some(provider) = self.otel.meter_provider {
+					opentelemetry::global::set_meter_provider(provider.clone());
+					otel_guards.meter = Some(provider);
+				}
+				if let Some(provider) = self.otel.logger_provider {
+					layers.push(opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(&provider).boxed());
+					otel_guards.logger = Some(provider);
+				}
+				layers.push(Box::new(profiling));
+				tracing::subscriber::set_global_default(subscriber.with(layers))?;
+				Ok(otel_guards)
 			} else {
 				let subscriber = prepare_subscriber(
 					&self.directives,
@@ -314,9 +377,24 @@ impl LoggerBuilder {
 					.into_iter()
 					.for_each(|profiler| profiling.add_handler(profiler));
 
-				tracing::subscriber::set_global_default(subscriber.with(profiling))?;
 
-				Ok(())
+				let mut layers = vec![];
+				if let Some((provider, tracer)) = self.otel.tracer_provider {
+					opentelemetry::global::set_tracer_provider(provider.clone());
+					layers.push(tracing_opentelemetry::layer().with_tracer(tracer).boxed());
+					otel_guards.tracer = Some(provider);
+				}
+				if let Some(provider) = self.otel.meter_provider {
+					opentelemetry::global::set_meter_provider(provider.clone());
+					otel_guards.meter = Some(provider);
+				}
+				if let Some(provider) = self.otel.logger_provider {
+					layers.push(opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(&provider).boxed());
+					otel_guards.logger = Some(provider);
+				}
+				layers.push(Box::new(profiling));
+				tracing::subscriber::set_global_default(subscriber.with(layers))?;
+				Ok(otel_guards)
 			}
 		} else if self.log_reloading {
 			let subscriber = prepare_subscriber(
@@ -327,9 +405,22 @@ impl LoggerBuilder {
 				|builder| enable_log_reloading!(builder),
 			)?;
 
-			tracing::subscriber::set_global_default(subscriber)?;
-
-			Ok(())
+			let mut layers = vec![];
+			if let Some((provider, tracer)) = self.otel.tracer_provider {
+				opentelemetry::global::set_tracer_provider(provider.clone());
+				layers.push(tracing_opentelemetry::layer().with_tracer(tracer).boxed());
+				otel_guards.tracer = Some(provider);
+			}
+			if let Some(provider) = self.otel.meter_provider {
+				opentelemetry::global::set_meter_provider(provider.clone());
+				otel_guards.meter = Some(provider);
+			}
+			if let Some(provider) = self.otel.logger_provider {
+				layers.push(opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(&provider).boxed());
+				otel_guards.logger = Some(provider);
+			}
+			tracing::subscriber::set_global_default(subscriber.with(layers))?;
+			Ok(otel_guards)
 		} else {
 			let subscriber = prepare_subscriber(
 				&self.directives,
@@ -339,9 +430,22 @@ impl LoggerBuilder {
 				|builder| builder,
 			)?;
 
-			tracing::subscriber::set_global_default(subscriber)?;
-
-			Ok(())
+			let mut layers = vec![];
+			if let Some((provider, tracer)) = self.otel.tracer_provider {
+				opentelemetry::global::set_tracer_provider(provider.clone());
+				layers.push(tracing_opentelemetry::layer().with_tracer(tracer).boxed());
+				otel_guards.tracer = Some(provider);
+			}
+			if let Some(provider) = self.otel.meter_provider {
+				opentelemetry::global::set_meter_provider(provider.clone());
+				otel_guards.meter = Some(provider);
+			}
+			if let Some(provider) = self.otel.logger_provider {
+				layers.push(opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(&provider).boxed());
+				otel_guards.logger = Some(provider);
+			}
+			tracing::subscriber::set_global_default(subscriber.with(layers))?;
+			Ok(otel_guards)
 		}
 	}
 }
