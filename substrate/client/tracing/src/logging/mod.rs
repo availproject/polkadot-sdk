@@ -214,9 +214,9 @@ where
 /// Otel Builder
 #[derive(Default)]
 pub struct LoggerOtel {
-	tracer_provider: Option<(SdkTracerProvider, opentelemetry_sdk::trace::Tracer)>,
-	meter_provider: Option<SdkMeterProvider>,
-	logger_provider: Option<SdkLoggerProvider>,
+	pub tracer_provider: Option<(SdkTracerProvider, opentelemetry_sdk::trace::Tracer)>,
+	pub meter_provider: Option<SdkMeterProvider>,
+	pub logger_provider: Option<SdkLoggerProvider>,
 }
 
 /// Otel Builder
