@@ -48,6 +48,7 @@ use tracing_subscriber::{
 };
 use internal_utils::{build_otel_layers, OtelParams};
 pub use internal_utils::{OtelGuards};
+pub use internal_utils;
 
 pub use event_format::*;
 pub use fast_local_time::FastLocalTime;
