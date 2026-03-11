@@ -23,6 +23,7 @@ use log::info;
 use sc_service::{Configuration, Error as ServiceError, TaskManager};
 use sc_utils::metrics::{TOKIO_THREADS_ALIVE, TOKIO_THREADS_TOTAL};
 use std::{marker::PhantomData, time::Duration};
+use sc_tracing::logging::OtelGuards;
 
 /// Build a tokio runtime with all features.
 pub fn build_runtime() -> std::result::Result<tokio::runtime::Runtime, std::io::Error> {
@@ -43,6 +44,7 @@ pub struct Runner<C: SubstrateCli> {
 	config: Configuration,
 	tokio_runtime: tokio::runtime::Runtime,
 	signals: Signals,
+	otel_guards: OtelGuards,
 	phantom: PhantomData<C>,
 }
 
@@ -52,8 +54,9 @@ impl<C: SubstrateCli> Runner<C> {
 		config: Configuration,
 		tokio_runtime: tokio::runtime::Runtime,
 		signals: Signals,
+		otel_guards: OtelGuards,
 	) -> Result<Runner<C>> {
-		Ok(Runner { config, tokio_runtime, signals, phantom: PhantomData })
+		Ok(Runner { config, tokio_runtime, signals, otel_guards, phantom: PhantomData })
 	}
 
 	/// Log information about the node itself.

@@ -67,7 +67,7 @@ pub struct SharedParams {
 	pub detailed_log_output: bool,
 
 	/// Disable log color output.
-	#[arg(long)]
+	#[arg(long, default_value_t = true)]
 	pub disable_log_color: bool,
 
 	/// Enable feature to dynamically update and reload the log filter.

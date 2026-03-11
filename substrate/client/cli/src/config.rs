@@ -34,7 +34,7 @@ use sc_service::{
 	},
 	BlocksPruning, ChainSpec, TracingReceiver,
 };
-use sc_tracing::logging::LoggerBuilder;
+use sc_tracing::logging::{LoggerBuilder, OtelGuards};
 use std::{num::NonZeroU32, path::PathBuf};
 
 /// The maximum number of characters for a node name.
@@ -633,7 +633,7 @@ pub trait CliConfiguration<DCV: DefaultConfigurationValues = ()>: Sized {
 	/// 	}
 	/// }
 	/// ```
-	fn init<F>(&self, support_url: &String, impl_version: &String, logger_hook: F) -> Result<()>
+	fn init<F>(&self, support_url: &String, impl_version: &String, logger_hook: F) -> Result<OtelGuards>
 	where
 		F: FnOnce(&mut LoggerBuilder),
 	{
@@ -656,7 +656,7 @@ pub trait CliConfiguration<DCV: DefaultConfigurationValues = ()>: Sized {
 		// Call hook for custom profiling setup.
 		logger_hook(&mut logger);
 
-		logger.init()?;
+		let guard = logger.init()?;
 
 		match fdlimit::raise_fd_limit() {
 			Ok(fdlimit::Outcome::LimitRaised { to, .. }) => {
@@ -680,7 +680,7 @@ pub trait CliConfiguration<DCV: DefaultConfigurationValues = ()>: Sized {
 			},
 		}
 
-		Ok(())
+		Ok(guard)
 	}
 }
 

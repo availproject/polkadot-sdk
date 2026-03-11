@@ -52,6 +52,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true, default-features = true }
 tracing-log = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter", "parking_lot"] }
+internal-utils = { workspace = true, default-features = false, features = ["otel"] }
 
 [dev-dependencies]
 criterion = { workspace = true, default-features = true }
