@@ -96,13 +96,13 @@ const LOG_TARGET: &str = "wasm-heap";
 // The minimum possible allocation size is chosen to be 8 bytes because in that case we would have
 // easier time to provide the guaranteed alignment of 8.
 //
-// The maximum possible allocation size is set in the primitives to 32MiB.
+// The maximum possible allocation size is set in the primitives to 128MiB.
 //
 // N_ORDERS - represents the number of orders supported.
 //
 // This number corresponds to the number of powers between the minimum possible allocation and
-// maximum possible allocation, or: 2^3...2^25 (both ends inclusive, hence 23).
-const N_ORDERS: usize = 23;
+// maximum possible allocation, or: 2^3...2^27 (both ends inclusive, hence 25).
+const N_ORDERS: usize = 25;
 const MIN_POSSIBLE_ALLOCATION: u32 = 8; // 2^3 bytes, 8 bytes
 
 /// The exponent for the power of two sized block adjusted to the minimum size.
@@ -117,6 +117,8 @@ const MIN_POSSIBLE_ALLOCATION: u32 = 8; // 2^3 bytes, 8 bytes
 /// ...
 /// 16777216          | 21
 /// 33554432          | 22
+/// 67108864          | 23
+/// 134217728         | 24
 ///
 /// and so on.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -1001,7 +1003,7 @@ mod tests {
 	#[test]
 	fn should_get_max_item_size_from_index() {
 		// given
-		let raw_order = 22;
+		let raw_order = 24;
 
 		// when
 		let item_size = Order::from_raw(raw_order).unwrap().size();
