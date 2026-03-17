@@ -1466,7 +1466,7 @@ zombienet-configuration = { version = "0.3.8" }
 zombienet-orchestrator = { version = "0.3.8" }
 zombienet-sdk = { version = "0.3.8" }
 zstd = { version = "0.12.4", default-features = false }
-internal-utils = { git = "https://github.com/availproject/engineering-toolkit", default-features = false, rev = "c0d9890c16e4c26ac3107051c7878613c4af83f8" }
+internal-utils = { git = "https://github.com/availproject/engineering-toolkit", default-features = false, rev = "06e165c94fe474958ae1a52e7a74fe67ad2c63f1" }
 
 [profile.release]
 # Polkadot runtime requires unwinding.

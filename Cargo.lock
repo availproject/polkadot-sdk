@@ -8631,7 +8631,7 @@ dependencies = [
 [[package]]
 name = "internal-utils"
 version = "0.0.0"
-source = "git+https://github.com/availproject/engineering-toolkit?rev=c0d9890c16e4c26ac3107051c7878613c4af83f8#c0d9890c16e4c26ac3107051c7878613c4af83f8"
+source = "git+https://github.com/availproject/engineering-toolkit?rev=06e165c94fe474958ae1a52e7a74fe67ad2c63f1#06e165c94fe474958ae1a52e7a74fe67ad2c63f1"
 dependencies = [
  "opentelemetry",
  "opentelemetry-appender-tracing",
