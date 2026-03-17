@@ -1735,7 +1735,6 @@ where
 		debug!(target: LOG_TARGET, "Restarting sync with client info {info:?}");
 
 		if matches!(self.mode, ChainSyncMode::LightState { .. }) && info.finalized_state.is_some() {
-		{
 			warn!(
 				target: LOG_TARGET,
 				"Can't use fast sync mode with a partially synced database. Reverting to full sync mode."
