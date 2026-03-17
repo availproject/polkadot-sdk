@@ -2107,12 +2107,45 @@ where
 		let median = heads[heads.len() / 2];
 		if finalized_number + STATE_SYNC_FINALITY_THRESHOLD.saturated_into() >= median {
 			if let Ok(Some(header)) = self.client.header(finalized_hash) {
+				let (body, justifications) = match self.mode {
+					ChainSyncMode::Fast { .. } => match self.client.block_body(finalized_hash) {
+						Ok(Some(body)) => {
+							let justifications = match self.client.justifications(finalized_hash) {
+								Ok(justifications) => justifications,
+								Err(error) => {
+									log::warn!(
+										target: LOG_TARGET,
+										"Failed to load justifications for finalized block #{finalized_number} ({finalized_hash}) before state sync: {error}",
+									);
+									None
+								},
+							};
+							(Some(body), justifications)
+						},
+						Ok(None) => {
+							log::error!(
+								target: LOG_TARGET,
+								"Failed to start fast state sync: finalized block #{finalized_number} ({finalized_hash}) has no body in local storage",
+							);
+							return;
+						},
+						Err(error) => {
+							log::error!(
+								target: LOG_TARGET,
+								"Failed to load body for finalized block #{finalized_number} ({finalized_hash}) before state sync: {error}",
+							);
+							return;
+						},
+					},
+					ChainSyncMode::Full | ChainSyncMode::LightState { .. } => (None, None),
+				};
+
 				log::debug!(
 					target: LOG_TARGET,
 					"Starting state sync for #{finalized_number} ({finalized_hash})",
 				);
 				self.state_sync =
-					Some(StateSync::new(self.client.clone(), header, None, None, skip_proofs));
+					Some(StateSync::new(self.client.clone(), header, body, justifications, skip_proofs));
 				self.allowed_requests.set_all();
 			} else {
 				log::error!(
