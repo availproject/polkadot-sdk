@@ -212,11 +212,8 @@ struct GapSync<B: BlockT> {
 pub enum ChainSyncMode {
 	/// Full block download and verification.
 	Full,
-	/// Download block bodies while skipping execution, then sync the latest state.
-	Fast {
-		/// Skip state proof download and verification.
-		skip_proofs: bool,
-	},
+	/// Avail light-client mode: only download headers and justifications.
+	AvailLight,
 	/// Download blocks and the latest state.
 	LightState {
 		/// Skip state proof download and verification.
@@ -790,20 +787,8 @@ where
 		});
 
 		match &self.mode {
-			ChainSyncMode::Fast { skip_proofs } => {
-				if self.state_sync.is_none() {
-					if !self.peers.is_empty() && self.queue_blocks.is_empty() {
-						self.attempt_state_sync(*hash, number, *skip_proofs);
-					} else {
-						self.pending_state_sync_attempt.replace((*hash, number, *skip_proofs));
-					}
-				}
-			},
-			ChainSyncMode::LightState { skip_proofs, storage_chain_mode } => {
-				// DA light-client mode (`storage_chain_mode = false`) intentionally avoids state sync.
-				if !*storage_chain_mode {
-					return
-				}
+			ChainSyncMode::AvailLight => {},
+			ChainSyncMode::LightState { skip_proofs, .. } => {
 
 				if self.state_sync.is_none() {
 					if !self.peers.is_empty() && self.queue_blocks.is_empty() {
@@ -1580,8 +1565,11 @@ where
 
 	fn required_block_attributes(&self) -> BlockAttributes {
 		match self.mode {
-			ChainSyncMode::Full | ChainSyncMode::Fast { .. } => {
+			ChainSyncMode::Full => {
 				BlockAttributes::HEADER | BlockAttributes::JUSTIFICATION | BlockAttributes::BODY
+			},
+			ChainSyncMode::AvailLight => {
+				BlockAttributes::HEADER | BlockAttributes::JUSTIFICATION
 			},
 			// temp: to be used by the DA lc
 			ChainSyncMode::LightState { storage_chain_mode: false, .. } => {
@@ -1598,7 +1586,7 @@ where
 	fn skip_execution(&self) -> bool {
 		match self.mode {
 			ChainSyncMode::Full => false,
-			ChainSyncMode::Fast { .. } | ChainSyncMode::LightState { .. } => true,
+			ChainSyncMode::AvailLight | ChainSyncMode::LightState { .. } => true,
 		}
 	}
 
@@ -1746,8 +1734,7 @@ where
 		let info = self.client.info();
 		debug!(target: LOG_TARGET, "Restarting sync with client info {info:?}");
 
-		if matches!(self.mode, ChainSyncMode::Fast { .. } | ChainSyncMode::LightState { storage_chain_mode: true, .. }) &&
-			info.finalized_state.is_some()
+		if matches!(self.mode, ChainSyncMode::LightState { .. }) && info.finalized_state.is_some() {
 		{
 			warn!(
 				target: LOG_TARGET,
@@ -2107,45 +2094,12 @@ where
 		let median = heads[heads.len() / 2];
 		if finalized_number + STATE_SYNC_FINALITY_THRESHOLD.saturated_into() >= median {
 			if let Ok(Some(header)) = self.client.header(finalized_hash) {
-				let (body, justifications) = match self.mode {
-					ChainSyncMode::Fast { .. } => match self.client.block_body(finalized_hash) {
-						Ok(Some(body)) => {
-							let justifications = match self.client.justifications(finalized_hash) {
-								Ok(justifications) => justifications,
-								Err(error) => {
-									log::warn!(
-										target: LOG_TARGET,
-										"Failed to load justifications for finalized block #{finalized_number} ({finalized_hash}) before state sync: {error}",
-									);
-									None
-								},
-							};
-							(Some(body), justifications)
-						},
-						Ok(None) => {
-							log::error!(
-								target: LOG_TARGET,
-								"Failed to start fast state sync: finalized block #{finalized_number} ({finalized_hash}) has no body in local storage",
-							);
-							return;
-						},
-						Err(error) => {
-							log::error!(
-								target: LOG_TARGET,
-								"Failed to load body for finalized block #{finalized_number} ({finalized_hash}) before state sync: {error}",
-							);
-							return;
-						},
-					},
-					ChainSyncMode::Full | ChainSyncMode::LightState { .. } => (None, None),
-				};
-
 				log::debug!(
 					target: LOG_TARGET,
 					"Starting state sync for #{finalized_number} ({finalized_hash})",
 				);
 				self.state_sync =
-					Some(StateSync::new(self.client.clone(), header, body, justifications, skip_proofs));
+					Some(StateSync::new(self.client.clone(), header, None, None, skip_proofs));
 				self.allowed_requests.set_all();
 			} else {
 				log::error!(

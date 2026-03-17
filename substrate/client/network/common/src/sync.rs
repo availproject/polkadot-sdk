@@ -25,11 +25,8 @@ pub mod message;
 pub enum SyncMode {
 	/// Full block download and verification.
 	Full,
-	/// Download block bodies while skipping execution, then sync the latest state.
-	Fast {
-		/// Skip state proof download and verification.
-		skip_proofs: bool,
-	},
+	/// Avail light-client mode: only download headers and justifications.
+	AvailLight,
 	/// Download blocks and the latest state.
 	LightState {
 		/// Skip state proof download and verification.
