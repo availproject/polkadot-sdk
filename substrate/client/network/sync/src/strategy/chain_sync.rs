@@ -212,6 +212,11 @@ struct GapSync<B: BlockT> {
 pub enum ChainSyncMode {
 	/// Full block download and verification.
 	Full,
+	/// Download block bodies while skipping execution, then sync the latest state.
+	Fast {
+		/// Skip state proof download and verification.
+		skip_proofs: bool,
+	},
 	/// Download blocks and the latest state.
 	LightState {
 		/// Skip state proof download and verification.
@@ -784,19 +789,31 @@ where
 			is_descendent_of(&**client, base, block)
 		});
 
-		if let ChainSyncMode::LightState { skip_proofs, storage_chain_mode } = &self.mode {
-			// DA light-client mode (`storage_chain_mode = false`) intentionally avoids state sync.
-			if !*storage_chain_mode {
-				return
-			}
-
-			if self.state_sync.is_none() {
-				if !self.peers.is_empty() && self.queue_blocks.is_empty() {
-					self.attempt_state_sync(*hash, number, *skip_proofs);
-				} else {
-					self.pending_state_sync_attempt.replace((*hash, number, *skip_proofs));
+		match &self.mode {
+			ChainSyncMode::Fast { skip_proofs } => {
+				if self.state_sync.is_none() {
+					if !self.peers.is_empty() && self.queue_blocks.is_empty() {
+						self.attempt_state_sync(*hash, number, *skip_proofs);
+					} else {
+						self.pending_state_sync_attempt.replace((*hash, number, *skip_proofs));
+					}
 				}
-			}
+			},
+			ChainSyncMode::LightState { skip_proofs, storage_chain_mode } => {
+				// DA light-client mode (`storage_chain_mode = false`) intentionally avoids state sync.
+				if !*storage_chain_mode {
+					return
+				}
+
+				if self.state_sync.is_none() {
+					if !self.peers.is_empty() && self.queue_blocks.is_empty() {
+						self.attempt_state_sync(*hash, number, *skip_proofs);
+					} else {
+						self.pending_state_sync_attempt.replace((*hash, number, *skip_proofs));
+					}
+				}
+			},
+			ChainSyncMode::Full => {},
 		}
 
 		if let Err(err) = r {
@@ -1563,7 +1580,7 @@ where
 
 	fn required_block_attributes(&self) -> BlockAttributes {
 		match self.mode {
-			ChainSyncMode::Full => {
+			ChainSyncMode::Full | ChainSyncMode::Fast { .. } => {
 				BlockAttributes::HEADER | BlockAttributes::JUSTIFICATION | BlockAttributes::BODY
 			},
 			// temp: to be used by the DA lc
@@ -1581,7 +1598,7 @@ where
 	fn skip_execution(&self) -> bool {
 		match self.mode {
 			ChainSyncMode::Full => false,
-			ChainSyncMode::LightState { .. } => true,
+			ChainSyncMode::Fast { .. } | ChainSyncMode::LightState { .. } => true,
 		}
 	}
 
@@ -1729,7 +1746,7 @@ where
 		let info = self.client.info();
 		debug!(target: LOG_TARGET, "Restarting sync with client info {info:?}");
 
-		if matches!(self.mode, ChainSyncMode::LightState { storage_chain_mode: true, .. }) &&
+		if matches!(self.mode, ChainSyncMode::Fast { .. } | ChainSyncMode::LightState { storage_chain_mode: true, .. }) &&
 			info.finalized_state.is_some()
 		{
 			warn!(
