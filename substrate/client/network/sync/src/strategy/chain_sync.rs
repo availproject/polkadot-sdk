@@ -2099,8 +2099,15 @@ where
 					target: LOG_TARGET,
 					"Starting state sync for #{finalized_number} ({finalized_hash})",
 				);
-				self.state_sync =
-					Some(StateSync::new(self.client.clone(), header, None, None, skip_proofs));
+				let body = self.client.block_body(finalized_hash).ok().flatten();
+				let justifications = self.client.justifications(finalized_hash).ok().flatten();
+				self.state_sync = Some(StateSync::new(
+					self.client.clone(),
+					header,
+					body,
+					justifications,
+					skip_proofs,
+				));
 				self.allowed_requests.set_all();
 			} else {
 				log::error!(
