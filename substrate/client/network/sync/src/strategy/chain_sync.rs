@@ -212,6 +212,8 @@ struct GapSync<B: BlockT> {
 pub enum ChainSyncMode {
 	/// Full block download and verification.
 	Full,
+	/// Avail light-client mode: only download headers and justifications.
+	AvailLight,
 	/// Download blocks and the latest state.
 	LightState {
 		/// Skip state proof download and verification.
@@ -784,19 +786,18 @@ where
 			is_descendent_of(&**client, base, block)
 		});
 
-		if let ChainSyncMode::LightState { skip_proofs, storage_chain_mode } = &self.mode {
-			// DA light-client mode (`storage_chain_mode = false`) intentionally avoids state sync.
-			if !*storage_chain_mode {
-				return
-			}
-
-			if self.state_sync.is_none() {
-				if !self.peers.is_empty() && self.queue_blocks.is_empty() {
-					self.attempt_state_sync(*hash, number, *skip_proofs);
-				} else {
-					self.pending_state_sync_attempt.replace((*hash, number, *skip_proofs));
+		match &self.mode {
+			ChainSyncMode::AvailLight => {},
+			ChainSyncMode::LightState { skip_proofs, .. } => {
+				if self.state_sync.is_none() {
+					if !self.peers.is_empty() && self.queue_blocks.is_empty() {
+						self.attempt_state_sync(*hash, number, *skip_proofs);
+					} else {
+						self.pending_state_sync_attempt.replace((*hash, number, *skip_proofs));
+					}
 				}
-			}
+			},
+			ChainSyncMode::Full => {},
 		}
 
 		if let Err(err) = r {
@@ -1566,9 +1567,13 @@ where
 			ChainSyncMode::Full => {
 				BlockAttributes::HEADER | BlockAttributes::JUSTIFICATION | BlockAttributes::BODY
 			},
-			// temp: to be used by the DA lc
-			ChainSyncMode::LightState { storage_chain_mode: false, .. } => {
+			ChainSyncMode::AvailLight => {
 				BlockAttributes::HEADER | BlockAttributes::JUSTIFICATION
+			},
+			ChainSyncMode::LightState { storage_chain_mode: false, .. } => {
+				BlockAttributes::HEADER
+					| BlockAttributes::JUSTIFICATION
+					| BlockAttributes::BODY
 			},
 			ChainSyncMode::LightState { storage_chain_mode: true, .. } => {
 				BlockAttributes::HEADER
@@ -1581,7 +1586,7 @@ where
 	fn skip_execution(&self) -> bool {
 		match self.mode {
 			ChainSyncMode::Full => false,
-			ChainSyncMode::LightState { .. } => true,
+			ChainSyncMode::AvailLight | ChainSyncMode::LightState { .. } => true,
 		}
 	}
 
