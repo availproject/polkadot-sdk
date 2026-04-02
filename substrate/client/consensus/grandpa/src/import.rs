@@ -473,42 +473,53 @@ where
 		let import_result = (&*self.inner).import_block(block).await;
 		match import_result {
 			Ok(ImportResult::Imported(aux)) => {
-				// We've just imported a new state. We trust the sync module has verified
-				// finality proofs and that the state is correct and final.
-				// So we can read the authority list and set id from the state.
-				self.authority_set_hard_forks.lock().clear();
-				let authorities = self
-					.inner
-					.runtime_api()
-					.grandpa_authorities(hash)
-					.map_err(|e| ConsensusError::ClientImport(e.to_string()))?;
-				let set_id = self.current_set_id(hash)?;
-				let authority_set = AuthoritySet::new(
-					authorities.clone(),
-					set_id,
-					fork_tree::ForkTree::new(),
-					Vec::new(),
-					AuthoritySetChanges::empty(),
-				)
-				.ok_or_else(|| ConsensusError::ClientImport("Invalid authority list".into()))?;
-				*self.authority_set.inner_locked() = authority_set.clone();
-
-				crate::aux_schema::update_authority_set::<Block, _, _>(
-					&authority_set,
-					None,
-					|insert| self.inner.insert_aux(insert, []),
-				)
-				.map_err(|e| ConsensusError::ClientImport(e.to_string()))?;
-				let new_set =
-					NewAuthoritySet { canon_number: number, canon_hash: hash, set_id, authorities };
-				let _ = self
-					.send_voter_commands
-					.unbounded_send(VoterCommand::ChangeAuthorities(new_set));
+				self.reset_authority_set_from_state(hash, number)?;
 				Ok(ImportResult::Imported(aux))
+			},
+			Ok(ImportResult::AlreadyInChain) => {
+				// The warp/state target block may already be present from the proof/bootstrap path,
+				// but the imported state still establishes the correct GRANDPA set for continuing
+				// live sync as a light client.
+				self.reset_authority_set_from_state(hash, number)?;
+				Ok(ImportResult::AlreadyInChain)
 			},
 			Ok(r) => Ok(r),
 			Err(e) => Err(ConsensusError::ClientImport(e.to_string())),
 		}
+	}
+
+	fn reset_authority_set_from_state(
+		&self,
+		hash: Block::Hash,
+		number: NumberFor<Block>,
+	) -> Result<(), ConsensusError> {
+		// We've just imported a new trusted state snapshot. Rebuild the local GRANDPA authority
+		// set from that state so the observer/voter can validate commits for the live chain.
+		self.authority_set_hard_forks.lock().clear();
+		let authorities = self
+			.inner
+			.runtime_api()
+			.grandpa_authorities(hash)
+			.map_err(|e| ConsensusError::ClientImport(e.to_string()))?;
+		let set_id = self.current_set_id(hash)?;
+		let authority_set = AuthoritySet::new(
+			authorities.clone(),
+			set_id,
+			fork_tree::ForkTree::new(),
+			Vec::new(),
+			AuthoritySetChanges::empty(),
+		)
+		.ok_or_else(|| ConsensusError::ClientImport("Invalid authority list".into()))?;
+		*self.authority_set.inner_locked() = authority_set.clone();
+
+		crate::aux_schema::update_authority_set::<Block, _, _>(&authority_set, None, |insert| {
+			self.inner.insert_aux(insert, [])
+		})
+		.map_err(|e| ConsensusError::ClientImport(e.to_string()))?;
+
+		let new_set = NewAuthoritySet { canon_number: number, canon_hash: hash, set_id, authorities };
+		let _ = self.send_voter_commands.unbounded_send(VoterCommand::ChangeAuthorities(new_set));
+		Ok(())
 	}
 }
 
