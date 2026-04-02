@@ -228,6 +228,8 @@ pub struct BlockImportParams<Block: BlockT> {
 	pub fork_choice: Option<ForkChoiceStrategy>,
 	/// Re-validate existing block.
 	pub import_existing: bool,
+	/// Allow importing the block if parent block is missing.
+	pub allow_missing_parent: bool,
 	/// Whether to create "block gap" in case this block doesn't have parent.
 	pub create_gap: bool,
 	/// Cached full header hash (with post-digests applied).
@@ -250,6 +252,7 @@ impl<Block: BlockT> BlockImportParams<Block> {
 			auxiliary: Vec::new(),
 			fork_choice: None,
 			import_existing: false,
+			allow_missing_parent: false,
 			create_gap: true,
 			post_hash: None,
 		}

@@ -359,6 +359,7 @@ pub(crate) async fn verify_single_block_metered<B: BlockT, V: Verifier<B>>(
 	import_block.justifications = justifications;
 	import_block.post_hash = Some(hash);
 	import_block.import_existing = block.import_existing;
+	import_block.allow_missing_parent = block.state.is_some();
 	import_block.indexed_body = block.indexed_body;
 
 	if let Some(state) = block.state {
