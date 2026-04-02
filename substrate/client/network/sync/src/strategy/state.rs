@@ -222,6 +222,14 @@ impl<B: BlockT> StateStrategy<B> {
 
 		match self.state_sync.import(response) {
 			ImportResult::Import(hash, header, state, body, justifications) => {
+				log::info!(
+					target: LOG_TARGET,
+					"StateStrategy queued state target import: #{} ({:?}), body={}, justifications={}",
+					header.number(),
+					hash,
+					body.is_some(),
+					justifications.is_some(),
+				);
 				let origin = BlockOrigin::NetworkInitialSync;
 				let block = IncomingBlock {
 					hash,
