@@ -437,7 +437,11 @@ where
 			.map_err(Error::RuntimeApi)?;
 
 		let current = self.persistent_data.authority_set.clone_inner();
-		if current.set_id == set_id && current.current_authorities == authorities {
+		let current_base = self.persistent_data.set_state.read().completed_rounds().last().base;
+		if current.set_id == set_id &&
+			current.current_authorities == authorities &&
+			current_base == (hash, number)
+		{
 			return Ok(())
 		}
 
