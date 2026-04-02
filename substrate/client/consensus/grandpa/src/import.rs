@@ -530,6 +530,8 @@ where
 	) -> Result<ImportResult, Self::Error> {
 		let hash = block.post_hash();
 		let number = *block.header.number();
+		let process_live_justifications =
+			block.body.is_none() && block.indexed_body.is_none() && matches!(block.state_action, sc_consensus::StateAction::Skip);
 
 		// early exit if block already in chain, otherwise the check for
 		// authority changes will error when trying to re-import a change block
@@ -649,12 +651,14 @@ where
 
 		match grandpa_justification {
 			Some(justification) => {
-				if environment::should_process_justification(
+				if process_live_justifications || environment::should_process_justification(
 					&*self.inner,
 					self.justification_import_period,
 					number,
 					needs_justification,
 				) {
+					// Header-only sync modes still need their finalized head to advance, so they
+					// must not rely on the full-node periodic justification heuristic.
 					let import_res = self.import_justification(
 						hash,
 						number,
