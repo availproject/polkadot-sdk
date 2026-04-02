@@ -770,7 +770,14 @@ where
 					// Don't mark it as bad as it still may be synced if explicitly requested.
 					trace!(target: LOG_TARGET, "Obsolete block {hash:?}");
 				},
-				e @ Err(BlockImportError::UnknownParent) | e @ Err(BlockImportError::Other(_)) => {
+				Err(BlockImportError::UnknownParent) => {
+					warn!(target: LOG_TARGET, "💔 Error importing block {hash:?}: block has an unknown parent");
+					self.state_sync = None;
+					if self.mode != ChainSyncMode::AvailLight {
+						self.restart();
+					}
+				},
+				e @ Err(BlockImportError::Other(_)) => {
 					warn!(target: LOG_TARGET, "💔 Error importing block {hash:?}: {}", e.unwrap_err());
 					self.state_sync = None;
 					self.restart();

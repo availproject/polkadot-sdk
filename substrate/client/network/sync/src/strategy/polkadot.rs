@@ -497,16 +497,6 @@ where
 				state.is_succeeded()
 			{
 				let info = self.client.info();
-				info!(
-					target: LOG_TARGET,
-					"Avail-light handoff after warp/state sync: anchor=#{} ({:?}), local_best=#{} ({:?}), local_finalized=#{} ({:?})",
-					state.target_number(),
-					state.target_hash(),
-					info.best_number,
-					info.best_hash,
-					info.finalized_number,
-					info.finalized_hash,
-				);
 				chain_sync.set_live_anchor(state.target_hash(), state.target_number());
 			}
 

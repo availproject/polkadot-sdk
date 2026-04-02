@@ -104,14 +104,6 @@ where
 		// if the commit we've received targets a block lower or equal to the last
 		// finalized, ignore it and continue with the current state
 		if commit.target_number <= last_finalized_number {
-			debug!(
-				target: LOG_TARGET,
-				"Ignoring GRANDPA commit below current finalized head: round={}, target=#{} ({:?}), local_finalized=#{}",
-				round,
-				commit.target_number,
-				commit.target_hash,
-				last_finalized_number,
-			);
 			return future::ok(last_finalized_number)
 		}
 
@@ -127,15 +119,6 @@ where
 		if validation_result.is_valid() {
 			let finalized_hash = commit.target_hash;
 			let finalized_number = commit.target_number;
-			debug!(
-				target: LOG_TARGET,
-				"Validated GRANDPA commit: round={}, target=#{} ({:?}), local_finalized=#{}",
-				round,
-				finalized_number,
-				finalized_hash,
-				last_finalized_number,
-			);
-
 			// commit is valid, finalize the block it targets
 			match environment::finalize_block(
 				client.clone(),
@@ -148,15 +131,7 @@ where
 				justification_sender.as_ref(),
 				telemetry.clone(),
 			) {
-				Ok(_) => {
-					info!(
-						target: LOG_TARGET,
-						"Observer finalized block from commit: round={}, target=#{} ({:?})",
-						round,
-						finalized_number,
-						finalized_hash,
-					);
-				},
+				Ok(_) => {},
 				Err(e) => {
 					warn!(
 						target: LOG_TARGET,
@@ -316,13 +291,6 @@ where
 		);
 
 		let last_finalized_number = self.client.info().finalized_number;
-		info!(
-			target: LOG_TARGET,
-			"Rebuilding GRANDPA observer: set_id={}, voters={}, local_finalized=#{}",
-			set_id,
-			voters.len(),
-			last_finalized_number,
-		);
 
 		// NOTE: since we are not using `round_communication` we have to
 		// manually note the round with the gossip validator, otherwise we won't
@@ -374,14 +342,6 @@ where
 				set_state
 			},
 			VoterCommand::ChangeAuthorities(new) => {
-				info!(
-					target: LOG_TARGET,
-					"Observer received authority change: set_id={}, canon=#{} ({:?}), voters={}",
-					new.set_id,
-					new.canon_number,
-					new.canon_hash,
-					new.authorities.len(),
-				);
 				let authority_set = AuthoritySet::new(
 					new.authorities.clone(),
 					new.set_id,

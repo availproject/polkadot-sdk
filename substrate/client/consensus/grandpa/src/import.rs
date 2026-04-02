@@ -468,31 +468,11 @@ where
 	) -> Result<ImportResult, ConsensusError> {
 		let hash = block.post_hash();
 		let number = *block.header.number();
-		info!(
-			target: LOG_TARGET,
-			"GRANDPA import_state entered for target #{} ({:?}), justifications={}",
-			number,
-			hash,
-			block.justifications.is_some(),
-		);
 		// Force imported state finality.
 		block.finalized = true;
 		let import_result = (&*self.inner).import_block(block).await;
-		info!(
-			target: LOG_TARGET,
-			"GRANDPA import_state raw import result for target #{} ({:?}): {:?}",
-			number,
-			hash,
-			import_result.as_ref().map(|r| format!("{r:?}")).unwrap_or_else(|e| e.to_string()),
-		);
 		match import_result {
 			Ok(ImportResult::Imported(aux)) => {
-				info!(
-					target: LOG_TARGET,
-					"GRANDPA import_state imported target; resetting authority set from state for #{} ({:?})",
-					number,
-					hash,
-				);
 				self.reset_authority_set_from_state(hash, number)?;
 				Ok(ImportResult::Imported(aux))
 			},
@@ -500,12 +480,6 @@ where
 				// The warp/state target block may already be present from the proof/bootstrap path,
 				// but the imported state still establishes the correct GRANDPA set for continuing
 				// live sync as a light client.
-				info!(
-					target: LOG_TARGET,
-					"GRANDPA import_state found target already in chain; resetting authority set from state for #{} ({:?})",
-					number,
-					hash,
-				);
 				self.reset_authority_set_from_state(hash, number)?;
 				Ok(ImportResult::AlreadyInChain)
 			},
@@ -528,14 +502,6 @@ where
 			.grandpa_authorities(hash)
 			.map_err(|e| ConsensusError::ClientImport(e.to_string()))?;
 		let set_id = self.current_set_id(hash)?;
-		info!(
-			target: LOG_TARGET,
-			"Resetting GRANDPA authority set from trusted state target: #{} ({:?}), set_id={}, voters={}",
-			number,
-			hash,
-			set_id,
-			authorities.len(),
-		);
 		let authority_set = AuthoritySet::new(
 			authorities.clone(),
 			set_id,
@@ -553,12 +519,7 @@ where
 
 		let new_set = NewAuthoritySet { canon_number: number, canon_hash: hash, set_id, authorities };
 		match self.send_voter_commands.unbounded_send(VoterCommand::ChangeAuthorities(new_set)) {
-			Ok(()) => info!(
-				target: LOG_TARGET,
-				"Queued GRANDPA authority change command from trusted state target: #{} ({:?})",
-				number,
-				hash,
-			),
+			Ok(()) => {},
 			Err(error) => {
 				return Err(ConsensusError::ClientImport(format!(
 					"Failed to queue GRANDPA authority change command: {error}"
