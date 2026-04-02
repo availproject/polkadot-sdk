@@ -74,7 +74,6 @@ fn grandpa_observer<BE, Block: BlockT, Client, S, F>(
 	voters: &Arc<VoterSet<AuthorityId>>,
 	justification_sender: &Option<GrandpaJustificationSender<Block>>,
 	last_finalized_number: NumberFor<Block>,
-	tolerate_unknown_finality: bool,
 	commits: S,
 	note_round: F,
 	telemetry: Option<TelemetryHandle>,
@@ -135,15 +134,6 @@ where
 				telemetry.clone(),
 			) {
 				Ok(_) => {},
-				Err(CommandOrError::Error(crate::Error::Client(
-					sp_blockchain::Error::UnknownBlock(_),
-				))) if tolerate_unknown_finality => {
-					debug!(
-						target: LOG_TARGET,
-						"Ignoring GRANDPA finality for unknown block while light client ancestry is still syncing."
-					);
-					return future::ok(last_finalized_number)
-				},
 				Err(e) => return future::err(e),
 			};
 
@@ -211,7 +201,6 @@ where
 	let observer_work = ObserverWork::new(
 		client,
 		network,
-		matches!(config.local_role, sc_network::config::Role::LightClient),
 		persistent_data,
 		config.keystore,
 		voter_commands_rx,
@@ -233,7 +222,6 @@ struct ObserverWork<B: BlockT, BE, Client, N: NetworkT<B>, S: SyncingT<B>> {
 		Pin<Box<dyn Future<Output = Result<(), CommandOrError<B::Hash, NumberFor<B>>>> + Send>>,
 	client: Arc<Client>,
 	network: NetworkBridge<B, N, S>,
-	tolerate_unknown_finality: bool,
 	persistent_data: PersistentData<B>,
 	keystore: Option<KeystorePtr>,
 	voter_commands_rx: TracingUnboundedReceiver<VoterCommand<B::Hash, NumberFor<B>>>,
@@ -254,7 +242,6 @@ where
 	fn new(
 		client: Arc<Client>,
 		network: NetworkBridge<B, Network, Syncing>,
-		tolerate_unknown_finality: bool,
 		persistent_data: PersistentData<B>,
 		keystore: Option<KeystorePtr>,
 		voter_commands_rx: TracingUnboundedReceiver<VoterCommand<B::Hash, NumberFor<B>>>,
@@ -267,7 +254,6 @@ where
 			observer: Box::pin(future::pending()) as Pin<Box<_>>,
 			client,
 			network,
-			tolerate_unknown_finality,
 			persistent_data,
 			keystore: keystore.clone(),
 			voter_commands_rx,
@@ -322,7 +308,6 @@ where
 			&voters,
 			&self.justification_sender,
 			last_finalized_number,
-			self.tolerate_unknown_finality,
 			global_in,
 			note_round,
 			self.telemetry.clone(),
@@ -465,7 +450,6 @@ mod tests {
 		let observer = ObserverWork::new(
 			client,
 			tester.net_handle.clone(),
-			false,
 			persistent_data,
 			None,
 			voter_command_rx,
