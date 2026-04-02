@@ -342,6 +342,8 @@ pub struct ChainSync<B: BlockT, Client> {
 	block_downloader: Arc<dyn BlockDownloader<B>>,
 	/// Gap download process.
 	gap_sync: Option<GapSync<B>>,
+	/// Explicit live anchor used by `AvailLight` to continue from a recent bootstrap target.
+	live_anchor: Option<(B::Hash, NumberFor<B>)>,
 	/// Pending actions.
 	actions: Vec<SyncingAction<B>>,
 	/// Prometheus metrics.
@@ -974,6 +976,7 @@ where
 			import_existing: false,
 			block_downloader,
 			gap_sync: None,
+			live_anchor: None,
 			actions: Vec::new(),
 			metrics: metrics_registry.and_then(|r| match Metrics::register(r) {
 				Ok(metrics) => Some(metrics),
@@ -993,6 +996,21 @@ where
 		});
 
 		Ok(sync)
+	}
+
+	/// Set the live anchor used by `AvailLight` to continue syncing only new blocks.
+	pub fn set_live_anchor(&mut self, hash: B::Hash, number: NumberFor<B>) {
+		self.live_anchor = Some((hash, number));
+		self.best_queued_hash = hash;
+		self.best_queued_number = number;
+		self.gap_sync = None;
+		self.import_existing = false;
+
+		for peer in self.peers.values_mut() {
+			peer.common_number = std::cmp::min(peer.best_number, number);
+		}
+
+		self.allowed_requests.set_all();
 	}
 
 	/// Complete the gap sync if the target number is reached and there is a gap.
@@ -1748,6 +1766,11 @@ where
 		self.best_queued_hash = info.best_hash;
 		self.best_queued_number = info.best_number;
 
+		if let Some((hash, number)) = self.live_anchor {
+			self.best_queued_hash = hash;
+			self.best_queued_number = number;
+		}
+
 		if self.mode == ChainSyncMode::Full
 			&& self.client.block_status(info.best_hash)? != BlockStatus::InChainWithState
 		{
@@ -1764,14 +1787,25 @@ where
 			}
 		}
 
-		if let Some(BlockGap { start, end, .. }) = info.block_gap {
+		if self.mode != ChainSyncMode::AvailLight {
+			if let Some(BlockGap { start, end, .. }) = info.block_gap {
+				let old_gap = self.gap_sync.take().map(|g| (g.best_queued_number, g.target));
+				debug!(target: LOG_TARGET, "Starting gap sync #{start} - #{end} (old gap best and target: {old_gap:?})");
+				self.gap_sync = Some(GapSync {
+					best_queued_number: start - One::one(),
+					target: end,
+					blocks: BlockCollection::new(),
+				});
+			}
+		} else {
 			let old_gap = self.gap_sync.take().map(|g| (g.best_queued_number, g.target));
-			debug!(target: LOG_TARGET, "Starting gap sync #{start} - #{end} (old gap best and target: {old_gap:?})");
-			self.gap_sync = Some(GapSync {
-				best_queued_number: start - One::one(),
-				target: end,
-				blocks: BlockCollection::new(),
-			});
+			if old_gap.is_some() || info.block_gap.is_some() {
+				debug!(
+					target: LOG_TARGET,
+					"Ignoring block gap for AvailLight live sync (existing gap state: {old_gap:?})."
+				);
+			}
+			self.gap_sync = None;
 		}
 		trace!(
 			target: LOG_TARGET,

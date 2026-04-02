@@ -912,6 +912,7 @@ pub trait TestNetFactory: Default + Sized + Send {
 
 		let syncing_config = PolkadotSyncingStrategyConfig {
 			mode: network_config.sync_mode,
+			role: network_config.role.clone(),
 			max_parallel_downloads: network_config.max_parallel_downloads,
 			max_blocks_per_request: network_config.max_blocks_per_request,
 			metrics_registry: None,

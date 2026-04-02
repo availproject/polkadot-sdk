@@ -389,6 +389,18 @@ impl<B: BlockT> StateStrategy<B> {
 	pub fn is_succeeded(&self) -> bool {
 		self.succeeded
 	}
+
+	/// The target block number for this state sync.
+	#[must_use]
+	pub fn target_number(&self) -> NumberFor<B> {
+		self.state_sync.target_number()
+	}
+
+	/// The target block hash for this state sync.
+	#[must_use]
+	pub fn target_hash(&self) -> B::Hash {
+		self.state_sync.target_hash()
+	}
 }
 
 #[cfg(test)]
