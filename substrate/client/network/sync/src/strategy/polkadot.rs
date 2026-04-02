@@ -412,6 +412,7 @@ where
 						res.target_header,
 						res.target_body,
 						res.target_justifications,
+						res.verified_finalized_target,
 						false,
 						self.peer_best_blocks
 							.iter()

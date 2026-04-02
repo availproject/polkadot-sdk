@@ -93,6 +93,8 @@ pub struct IncomingBlock<B: BlockT> {
 	pub import_existing: bool,
 	/// Do not compute new state, but rather set it to the given set.
 	pub state: Option<ImportedState<B>>,
+	/// This block is a verified finalized checkpoint and should advance the finalized head.
+	pub verified_finalized: bool,
 }
 
 /// Verify a justification of a block
@@ -361,6 +363,7 @@ pub(crate) async fn verify_single_block_metered<B: BlockT, V: Verifier<B>>(
 	import_block.import_existing = block.import_existing;
 	import_block.allow_missing_parent = block.state.is_some();
 	import_block.indexed_body = block.indexed_body;
+	import_block.finalized = block.verified_finalized;
 
 	if let Some(state) = block.state {
 		let changes = crate::block_import::StorageChanges::Import(state);
