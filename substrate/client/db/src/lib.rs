@@ -1662,6 +1662,11 @@ impl<Block: BlockT> Backend<Block> {
 			// VERY IMPORTANT
 			drop(operation.old_state);
 
+			let creates_gap = operation.create_gap &&
+				number > best_num + One::one() &&
+				self.blockchain.header(parent_hash)?.is_none();
+			let has_or_creates_gap = block_gap.is_some() || creates_gap;
+
 			if finalized {
 				// TODO: ensure best chain contains this block.
 				self.ensure_sequential_finalization(header, Some(last_finalized_hash))?;
@@ -1675,8 +1680,12 @@ impl<Block: BlockT> Backend<Block> {
 					true,
 				)?;
 			} else {
-				// canonicalize blocks which are old enough, regardless of finality.
-				self.force_delayed_canonicalize(&mut transaction)?
+				// Warp/state sync can legitimately create a sparse chain with a recorded block gap.
+				// Delayed canonicalization must wait until that gap is filled.
+				if !has_or_creates_gap {
+					// canonicalize blocks which are old enough, regardless of finality.
+					self.force_delayed_canonicalize(&mut transaction)?
+				}
 			}
 
 			if !existing_header {
