@@ -330,6 +330,7 @@ pub(crate) async fn verify_single_block_metered<B: BlockT, V: Verifier<B>>(
 	let number = *header.number();
 	let hash = block.hash;
 	let parent_hash = *header.parent_hash();
+	let has_trusted_state = block.state.is_some() && block.import_existing;
 
 	match import_handler::<B>(
 		number,
@@ -348,6 +349,14 @@ pub(crate) async fn verify_single_block_metered<B: BlockT, V: Verifier<B>>(
 			.await,
 	)? {
 		BlockImportStatus::ImportedUnknown { .. } => (),
+		r if has_trusted_state => {
+			debug!(
+				target: LOG_TARGET,
+				"Re-importing known block {} ({}) because a trusted state snapshot is attached.",
+				number,
+				hash,
+			);
+		},
 		r => {
 			// Any other successful result means that the block is already imported.
 			return Ok(SingleBlockVerificationOutcome::Imported(r))
