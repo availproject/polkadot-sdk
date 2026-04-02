@@ -19,7 +19,7 @@
 use std::{collections::HashMap, marker::PhantomData, sync::Arc};
 
 use codec::Decode;
-use log::debug;
+use log::{debug, info, warn};
 use parking_lot::Mutex;
 
 use sc_client_api::{backend::Backend, utils::is_descendent_of};
@@ -649,12 +649,26 @@ where
 
 		match grandpa_justification {
 			Some(justification) => {
+				info!(
+					target: LOG_TARGET,
+					"Imported block carries GRANDPA justification: #{}, hash={:?}, needs_justification={}, initial_sync={}",
+					number,
+					hash,
+					needs_justification,
+					initial_sync,
+				);
 				if environment::should_process_justification(
 					&*self.inner,
 					self.justification_import_period,
 					number,
 					needs_justification,
 				) {
+					info!(
+						target: LOG_TARGET,
+						"Processing GRANDPA justification attached to imported block: #{}, hash={:?}",
+						number,
+						hash,
+					);
 					let import_res = self.import_justification(
 						hash,
 						number,
@@ -664,6 +678,13 @@ where
 					);
 
 					import_res.unwrap_or_else(|err| {
+						warn!(
+							target: LOG_TARGET,
+							"Failed to process attached GRANDPA justification: #{}, hash={:?}, error={}",
+							number,
+							hash,
+							err,
+						);
 						if needs_justification {
 							debug!(
 								target: LOG_TARGET,
@@ -676,10 +697,12 @@ where
 						}
 					});
 				} else {
-					debug!(
+					info!(
 						target: LOG_TARGET,
-						"Ignoring unnecessary justification for block #{}",
+						"Ignoring attached GRANDPA justification due to heuristic: #{}, hash={:?}, finalized_now=#{}",
 						number,
+						hash,
+						self.inner.info().finalized_number,
 					);
 				}
 			},
