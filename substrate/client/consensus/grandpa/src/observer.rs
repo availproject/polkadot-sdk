@@ -507,6 +507,13 @@ where
 			},
 		}
 
+		let info = self.client.info();
+		let current_base = self.persistent_data.set_state.read().completed_rounds().last().base;
+		if current_base != (info.finalized_hash, info.finalized_number) {
+			self.maybe_rebootstrap_from_finalized(info.finalized_hash, info.finalized_number)?;
+			cx.waker().wake_by_ref();
+		}
+
 		match Stream::poll_next(Pin::new(&mut self.finality_notifications), cx) {
 			Poll::Pending => {},
 			Poll::Ready(None) => {},
