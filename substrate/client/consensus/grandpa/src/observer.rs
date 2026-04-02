@@ -33,20 +33,19 @@ use sc_telemetry::TelemetryHandle;
 use sc_utils::mpsc::TracingUnboundedReceiver;
 use sp_blockchain::HeaderMetadata;
 use sp_consensus::SelectChain;
-use sp_consensus_grandpa::AuthorityId;
+use sp_consensus_grandpa::{AuthorityId, GrandpaApi};
 use sp_keystore::KeystorePtr;
-use sp_runtime::traits::{Block as BlockT, NumberFor};
+use sp_runtime::traits::{Block as BlockT, Header as HeaderT, NumberFor};
 
 use crate::{
 	authorities::SharedAuthoritySet,
-	aux_schema::PersistentData,
+	aux_schema::{self, PersistentData},
 	communication::{Network as NetworkT, NetworkBridge, Syncing as SyncingT},
 	environment, global_communication,
 	notification::GrandpaJustificationSender,
-	ClientForGrandpa, CommandOrError, CommunicationIn, Config, Error, LinkHalf, VoterCommand,
-	VoterSetState, LOG_TARGET,
+	AuthoritySet, AuthoritySetChanges, ClientForGrandpa, CommandOrError, CommunicationIn, Config,
+	Error, LinkHalf, VoterCommand, VoterSetState, LOG_TARGET,
 };
-
 struct ObserverChain<'a, Block: BlockT, Client> {
 	client: &'a Arc<Client>,
 	_phantom: PhantomData<Block>,
@@ -212,6 +211,7 @@ where
 	SC: SelectChain<Block>,
 	NumberFor<Block>: BlockNumberOps,
 	Client: ClientForGrandpa<Block, BE> + 'static,
+	Client::Api: GrandpaApi<Block>,
 {
 	let LinkHalf {
 		client,
@@ -255,6 +255,7 @@ struct ObserverWork<B: BlockT, BE, Client, N: NetworkT<B>, S: SyncingT<B>> {
 	observer:
 		Pin<Box<dyn Future<Output = Result<(), CommandOrError<B::Hash, NumberFor<B>>>> + Send>>,
 	client: Arc<Client>,
+	finality_notifications: sc_client_api::FinalityNotifications<B>,
 	network: NetworkBridge<B, N, S>,
 	persistent_data: PersistentData<B>,
 	keystore: Option<KeystorePtr>,
@@ -287,6 +288,7 @@ where
 			// calling `rebuild_observer`.
 			observer: Box::pin(future::pending()) as Pin<Box<_>>,
 			client,
+			finality_notifications: work_client_finality_stream_placeholder(),
 			network,
 			persistent_data,
 			keystore: keystore.clone(),
@@ -295,6 +297,7 @@ where
 			telemetry,
 			_phantom: PhantomData,
 		};
+		work.finality_notifications = work.client.finality_notification_stream();
 		work.rebuild_observer();
 		work
 	}
@@ -383,11 +386,23 @@ where
 					new.canon_hash,
 					new.authorities.len(),
 				);
+				let authority_set = AuthoritySet::new(
+					new.authorities.clone(),
+					new.set_id,
+					fork_tree::ForkTree::new(),
+					Vec::new(),
+					AuthoritySetChanges::empty(),
+				)
+				.ok_or_else(|| Error::Safety("Invalid authority set during observer rebootstrap".into()))?;
+				*self.persistent_data.authority_set.inner_locked() = authority_set.clone();
+				aux_schema::update_authority_set::<B, _, _>(&authority_set, None, |insert| {
+					self.client.insert_aux(insert, [])
+				})?;
 				// start the new authority set using the block where the
 				// set changed (not where the signal happened!) as the base.
 				let set_state = VoterSetState::live(
 					new.set_id,
-					&*self.persistent_data.authority_set.inner(),
+					&authority_set,
 					(new.canon_hash, new.canon_number),
 				);
 
@@ -401,6 +416,47 @@ where
 		self.rebuild_observer();
 		Ok(())
 	}
+
+	fn maybe_rebootstrap_from_finalized(
+		&mut self,
+		hash: B::Hash,
+		number: NumberFor<B>,
+	) -> Result<(), Error>
+	where
+		Client::Api: GrandpaApi<B>,
+	{
+		let authorities = self
+			.client
+			.runtime_api()
+			.grandpa_authorities(hash)
+			.map_err(Error::RuntimeApi)?;
+		let set_id = self
+			.client
+			.runtime_api()
+			.current_set_id(hash)
+			.map_err(Error::RuntimeApi)?;
+
+		let current = self.persistent_data.authority_set.clone_inner();
+		if current.set_id == set_id && current.current_authorities == authorities {
+			return Ok(())
+		}
+
+		info!(
+			target: LOG_TARGET,
+			"Observer rebootstrap from finalized checkpoint: set_id={} at #{} ({:?}), voters={}",
+			set_id,
+			number,
+			hash,
+			authorities.len(),
+		);
+
+		self.handle_voter_command(VoterCommand::ChangeAuthorities(crate::NewAuthoritySet {
+			canon_hash: hash,
+			canon_number: number,
+			set_id,
+			authorities,
+		}))
+	}
 }
 
 impl<B, BE, C, N, S> Future for ObserverWork<B, BE, C, N, S>
@@ -408,6 +464,7 @@ where
 	B: BlockT,
 	BE: Backend<B> + Unpin + 'static,
 	C: ClientForGrandpa<B, BE> + 'static,
+	C::Api: GrandpaApi<B>,
 	N: NetworkT<B>,
 	S: SyncingT<B>,
 	NumberFor<B>: BlockNumberOps,
@@ -446,8 +503,24 @@ where
 			},
 		}
 
+		match Stream::poll_next(Pin::new(&mut self.finality_notifications), cx) {
+			Poll::Pending => {},
+			Poll::Ready(None) => {},
+			Poll::Ready(Some(notification)) => {
+				let hash = notification.hash;
+				let number = *notification.header.number();
+				self.maybe_rebootstrap_from_finalized(hash, number)?;
+				cx.waker().wake_by_ref();
+			},
+		}
+
 		Future::poll(Pin::new(&mut self.network), cx)
 	}
+}
+
+fn work_client_finality_stream_placeholder<B: BlockT>() -> sc_client_api::FinalityNotifications<B> {
+	let (_tx, rx) = sc_utils::mpsc::tracing_unbounded("grandpa_observer_finality_placeholder", 1);
+	rx
 }
 
 #[cfg(test)]
