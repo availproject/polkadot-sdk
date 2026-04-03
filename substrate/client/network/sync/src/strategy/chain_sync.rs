@@ -771,7 +771,17 @@ where
 					trace!(target: LOG_TARGET, "Obsolete block {hash:?}");
 				},
 				Err(BlockImportError::UnknownParent) => {
-					warn!(target: LOG_TARGET, "💔 Error importing block {hash:?}: block has an unknown parent");
+					if self.mode == ChainSyncMode::AvailLight {
+						debug!(
+							target: LOG_TARGET,
+							"Ignoring unknown-parent import during AvailLight live sync for block {hash:?}",
+						);
+					} else {
+						warn!(
+							target: LOG_TARGET,
+							"💔 Error importing block {hash:?}: block has an unknown parent"
+						);
+					}
 					self.state_sync = None;
 					if self.mode != ChainSyncMode::AvailLight {
 						self.restart();

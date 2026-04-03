@@ -667,7 +667,7 @@ where
 
 		match grandpa_justification {
 			Some(justification) => {
-				info!(
+				debug!(
 					target: LOG_TARGET,
 					"Imported block carries GRANDPA justification: #{}, hash={:?}, needs_justification={}, initial_sync={}",
 					number,
@@ -681,7 +681,7 @@ where
 					number,
 					needs_justification,
 				) {
-					info!(
+					debug!(
 						target: LOG_TARGET,
 						"Processing GRANDPA justification attached to imported block: #{}, hash={:?}",
 						number,
@@ -696,13 +696,6 @@ where
 					);
 
 					import_res.unwrap_or_else(|err| {
-						warn!(
-							target: LOG_TARGET,
-							"Failed to process attached GRANDPA justification: #{}, hash={:?}, error={}",
-							number,
-							hash,
-							err,
-						);
 						if needs_justification {
 							debug!(
 								target: LOG_TARGET,
@@ -715,12 +708,10 @@ where
 						}
 					});
 				} else {
-					info!(
+					debug!(
 						target: LOG_TARGET,
-						"Ignoring attached GRANDPA justification due to heuristic: #{}, hash={:?}, finalized_now=#{}",
-						number,
-						hash,
-						self.inner.info().finalized_number,
+						"Ignoring unnecessary justification for block #{}",
+						number
 					);
 				}
 			},

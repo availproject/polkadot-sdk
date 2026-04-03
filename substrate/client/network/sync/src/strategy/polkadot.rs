@@ -492,13 +492,12 @@ where
 				},
 			};
 
-			if matches!(self.config.mode, SyncMode::Warp) &&
-				matches!(self.config.role, Role::LightClient) &&
-				state.is_succeeded()
-			{
-				let info = self.client.info();
-				chain_sync.set_live_anchor(state.target_hash(), state.target_number());
-			}
+				if matches!(self.config.mode, SyncMode::Warp) &&
+					matches!(self.config.role, Role::LightClient) &&
+					state.is_succeeded()
+				{
+					chain_sync.set_live_anchor(state.target_hash(), state.target_number());
+				}
 
 			self.state = None;
 			self.chain_sync = Some(chain_sync);
