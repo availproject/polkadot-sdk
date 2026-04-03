@@ -93,6 +93,8 @@ pub struct IncomingBlock<B: BlockT> {
 	pub import_existing: bool,
 	/// Do not compute new state, but rather set it to the given set.
 	pub state: Option<ImportedState<B>>,
+	/// This block is a verified finalized checkpoint and should advance the finalized head.
+	pub verified_finalized: bool,
 }
 
 /// Verify a justification of a block
@@ -328,6 +330,7 @@ pub(crate) async fn verify_single_block_metered<B: BlockT, V: Verifier<B>>(
 	let number = *header.number();
 	let hash = block.hash;
 	let parent_hash = *header.parent_hash();
+	let has_trusted_state = block.state.is_some() && block.import_existing;
 
 	match import_handler::<B>(
 		number,
@@ -346,6 +349,14 @@ pub(crate) async fn verify_single_block_metered<B: BlockT, V: Verifier<B>>(
 			.await,
 	)? {
 		BlockImportStatus::ImportedUnknown { .. } => (),
+		r if has_trusted_state => {
+			debug!(
+				target: LOG_TARGET,
+				"Re-importing known block {} ({}) because a trusted state snapshot is attached.",
+				number,
+				hash,
+			);
+		},
 		r => {
 			// Any other successful result means that the block is already imported.
 			return Ok(SingleBlockVerificationOutcome::Imported(r))
@@ -359,9 +370,12 @@ pub(crate) async fn verify_single_block_metered<B: BlockT, V: Verifier<B>>(
 	import_block.justifications = justifications;
 	import_block.post_hash = Some(hash);
 	import_block.import_existing = block.import_existing;
+	import_block.allow_missing_parent = block.state.is_some();
 	import_block.indexed_body = block.indexed_body;
+	import_block.finalized = block.verified_finalized;
 
-	if let Some(state) = block.state {
+	let trusted_state = block.state;
+	if let Some(state) = trusted_state.clone() {
 		let changes = crate::block_import::StorageChanges::Import(state);
 		import_block.state_action = StateAction::ApplyChanges(changes);
 	} else if block.skip_execution {
@@ -370,7 +384,7 @@ pub(crate) async fn verify_single_block_metered<B: BlockT, V: Verifier<B>>(
 		import_block.state_action = StateAction::ExecuteIfPossible;
 	}
 
-	let import_block = verifier.verify(import_block).await.map_err(|msg| {
+	let mut import_block = verifier.verify(import_block).await.map_err(|msg| {
 		if let Some(ref peer) = peer {
 			trace!(
 				target: LOG_TARGET,
@@ -388,6 +402,20 @@ pub(crate) async fn verify_single_block_metered<B: BlockT, V: Verifier<B>>(
 		}
 		BlockImportError::VerificationFailed(peer, msg)
 	})?;
+
+	if let Some(state) = trusted_state {
+		if !matches!(import_block.state_action, StateAction::ApplyChanges(_)) {
+			debug!(
+				target: LOG_TARGET,
+				"Restoring trusted state snapshot for {} ({}) after verifier changed state action.",
+				number,
+				hash,
+			);
+			import_block.state_action = StateAction::ApplyChanges(
+				crate::block_import::StorageChanges::Import(state),
+			);
+		}
+	}
 
 	let verification_time = started.elapsed();
 	if let Some(metrics) = metrics {

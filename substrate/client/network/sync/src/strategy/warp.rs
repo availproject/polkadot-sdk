@@ -175,7 +175,7 @@ enum Phase<B: BlockT> {
 		warp_sync_provider: Arc<dyn WarpSyncProvider<B>>,
 	},
 	/// Downloading target block.
-	TargetBlock(B::Header),
+	TargetBlock { header: B::Header, verified_finalized_target: bool },
 	/// Warp sync is complete.
 	Complete,
 }
@@ -201,6 +201,7 @@ pub struct WarpSyncResult<B: BlockT> {
 	pub target_header: B::Header,
 	pub target_body: Option<Vec<B::Extrinsic>>,
 	pub target_justifications: Option<Justifications>,
+	pub verified_finalized_target: bool,
 }
 
 /// Warp sync state machine. Accumulates warp proofs and state.
@@ -262,7 +263,8 @@ where
 		let phase = match warp_sync_config {
 			WarpSyncConfig::WithProvider(warp_sync_provider) =>
 				Phase::WaitingForPeers { warp_sync_provider },
-			WarpSyncConfig::WithTarget(target_header) => Phase::TargetBlock(target_header),
+			WarpSyncConfig::WithTarget(target_header) =>
+				Phase::TargetBlock { header: target_header, verified_finalized_target: false },
 		};
 
 		Self {
@@ -421,6 +423,7 @@ where
 					// Shouldn't already exist in the database.
 					import_existing: false,
 					state: None,
+					verified_finalized: true,
 				}
 			};
 
@@ -450,7 +453,10 @@ where
 					header.number(),
 				);
 				self.total_proof_bytes += response.0.len() as u64;
-				self.phase = Phase::TargetBlock(header);
+				self.phase = Phase::TargetBlock {
+					header,
+					verified_finalized_target: true,
+				};
 				self.actions.push(SyncingAction::ImportBlocks {
 					origin: BlockOrigin::NetworkInitialSync,
 					blocks: proofs.into_iter().map(proof_to_incoming_block).collect(),
@@ -481,7 +487,7 @@ where
 			peer.state = PeerState::Available;
 		}
 
-		let Phase::TargetBlock(header) = &mut self.phase else {
+		let Phase::TargetBlock { header, verified_finalized_target } = &mut self.phase else {
 			debug!(target: LOG_TARGET, "Unexpected target block response from {peer_id}");
 			return Err(BadPeer(peer_id, rep::UNEXPECTED_RESPONSE))
 		};
@@ -535,6 +541,7 @@ where
 			target_header: header.clone(),
 			target_body: block.body,
 			target_justifications: block.justifications,
+			verified_finalized_target: *verified_finalized_target,
 		});
 		self.phase = Phase::Complete;
 		self.actions.push(SyncingAction::Finished);
@@ -602,7 +609,7 @@ where
 
 	/// Produce target block request.
 	fn target_block_request(&mut self) -> Option<(PeerId, BlockRequest<B>)> {
-		let Phase::TargetBlock(target_header) = &self.phase else { return None };
+		let Phase::TargetBlock { header: target_header, .. } = &self.phase else { return None };
 
 		if self
 			.peers
@@ -654,7 +661,7 @@ where
 				phase: WarpSyncPhase::DownloadingWarpProofs,
 				total_bytes: self.total_proof_bytes,
 			},
-			Phase::TargetBlock(_) => WarpSyncProgress {
+			Phase::TargetBlock { .. } => WarpSyncProgress {
 				phase: WarpSyncPhase::DownloadingTargetBlock,
 				total_bytes: self.total_proof_bytes,
 			},
@@ -676,13 +683,13 @@ where
 			state: match &self.phase {
 				Phase::WaitingForPeers { .. } => SyncState::Downloading { target: Zero::zero() },
 				Phase::WarpProof { .. } => SyncState::Downloading { target: Zero::zero() },
-				Phase::TargetBlock(header) => SyncState::Downloading { target: *header.number() },
+				Phase::TargetBlock { header, .. } => SyncState::Downloading { target: *header.number() },
 				Phase::Complete => SyncState::Idle,
 			},
 			best_seen_block: match &self.phase {
 				Phase::WaitingForPeers { .. } => None,
 				Phase::WarpProof { .. } => None,
-				Phase::TargetBlock(header) => Some(*header.number()),
+				Phase::TargetBlock { header, .. } => Some(*header.number()),
 				Phase::Complete => None,
 			},
 			num_peers: self.peers.len().saturated_into(),
@@ -1337,6 +1344,7 @@ mod test {
 				skip_execution: true,
 				import_existing: false,
 				state: None,
+				verified_finalized: false,
 			}
 		);
 		assert!(matches!(warp_sync.phase, Phase::WarpProof { .. }));
@@ -1421,6 +1429,7 @@ mod test {
 				skip_execution: true,
 				import_existing: false,
 				state: None,
+				verified_finalized: false,
 			}
 		);
 		assert!(

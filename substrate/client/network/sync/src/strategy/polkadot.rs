@@ -36,7 +36,7 @@ use log::{debug, error, info, warn};
 use prometheus_endpoint::Registry;
 use sc_client_api::{BlockBackend, ProofProvider};
 use sc_consensus::{BlockImportError, BlockImportStatus};
-use sc_network::ProtocolName;
+use sc_network::{config::Role, ProtocolName};
 use sc_network_common::sync::{message::BlockAnnounce, SyncMode};
 use sc_network_types::PeerId;
 use sp_blockchain::{Error as ClientError, HeaderBackend, HeaderMetadata};
@@ -62,6 +62,8 @@ where
 {
 	/// Syncing mode.
 	pub mode: SyncMode,
+	/// Local node role.
+	pub role: Role,
 	/// The number of parallel downloads to guard against slow peers.
 	pub max_parallel_downloads: u32,
 	/// Maximum number of blocks to request.
@@ -273,7 +275,7 @@ where
 			self.state.is_some() ||
 			match self.chain_sync {
 				Some(ref s) => s.status().state.is_major_syncing(),
-				None => unreachable!("At least one syncing strategy is active; qed"),
+				None => false,
 			}
 	}
 
@@ -410,6 +412,7 @@ where
 						res.target_header,
 						res.target_body,
 						res.target_justifications,
+						res.verified_finalized_target,
 						false,
 						self.peer_best_blocks
 							.iter()
@@ -452,12 +455,26 @@ where
 			}
 		} else if let Some(state) = &self.state {
 			if state.is_succeeded() {
-				info!(target: LOG_TARGET, "State sync is complete, continuing with block sync.");
+				if matches!(self.config.mode, SyncMode::Warp) && matches!(self.config.role, Role::LightClient) {
+					info!(
+						target: LOG_TARGET,
+						"State sync is complete, continuing with avail-light sync from the warp target."
+					);
+				} else {
+					info!(target: LOG_TARGET, "State sync is complete, continuing with block sync.");
+				}
 			} else {
 				error!(target: LOG_TARGET, "State sync failed. Falling back to full sync.");
 			}
-			let chain_sync = match ChainSync::new(
-				chain_sync_mode(self.config.mode),
+			let mut chain_sync = match ChainSync::new(
+				if matches!(self.config.mode, SyncMode::Warp) &&
+					matches!(self.config.role, Role::LightClient) &&
+					state.is_succeeded()
+				{
+					ChainSyncMode::AvailLight
+				} else {
+					chain_sync_mode(self.config.mode)
+				},
 				self.client.clone(),
 				self.config.max_parallel_downloads,
 				self.config.max_blocks_per_request,
@@ -474,6 +491,13 @@ where
 					return Err(e);
 				},
 			};
+
+				if matches!(self.config.mode, SyncMode::Warp) &&
+					matches!(self.config.role, Role::LightClient) &&
+					state.is_succeeded()
+				{
+					chain_sync.set_live_anchor(state.target_hash(), state.target_number());
+				}
 
 			self.state = None;
 			self.chain_sync = Some(chain_sync);

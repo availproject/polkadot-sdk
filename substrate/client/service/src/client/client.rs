@@ -803,6 +803,7 @@ where
 		<Self as ProvideRuntimeApi<Block>>::Api: CoreApi<Block> + ApiExt<Block>,
 	{
 		let parent_hash = import_block.header.parent_hash();
+		let allow_missing_parent = import_block.allow_missing_parent;
 		let state_action = std::mem::replace(&mut import_block.state_action, StateAction::Skip);
 		let (enact_state, storage_changes) = match (self.block_status(*parent_hash)?, state_action)
 		{
@@ -813,6 +814,7 @@ where
 				StateAction::ApplyChanges(sc_consensus::StorageChanges::Changes(_)),
 			) => return Ok(PrepareStorageChangesResult::Discard(ImportResult::MissingState)),
 			(_, StateAction::ApplyChanges(changes)) => (true, Some(changes)),
+			(BlockStatus::Unknown, _) if allow_missing_parent => (false, None),
 			(BlockStatus::Unknown, _) =>
 				return Ok(PrepareStorageChangesResult::Discard(ImportResult::UnknownParent)),
 			(_, StateAction::Skip) => (false, None),

@@ -78,6 +78,7 @@ pub struct StateStrategy<B: BlockT> {
 	actions: Vec<SyncingAction<B>>,
 	protocol_name: ProtocolName,
 	succeeded: bool,
+	verified_finalized_target: bool,
 }
 
 impl<B: BlockT> StateStrategy<B> {
@@ -90,6 +91,7 @@ impl<B: BlockT> StateStrategy<B> {
 		target_header: B::Header,
 		target_body: Option<Vec<B::Extrinsic>>,
 		target_justifications: Option<Justifications>,
+		verified_finalized_target: bool,
 		skip_proof: bool,
 		initial_peers: impl Iterator<Item = (PeerId, NumberFor<B>)>,
 		protocol_name: ProtocolName,
@@ -115,6 +117,7 @@ impl<B: BlockT> StateStrategy<B> {
 			actions: Vec::new(),
 			protocol_name,
 			succeeded: false,
+			verified_finalized_target,
 		}
 	}
 
@@ -138,6 +141,7 @@ impl<B: BlockT> StateStrategy<B> {
 			actions: Vec::new(),
 			protocol_name,
 			succeeded: false,
+			verified_finalized_target: false,
 		}
 	}
 
@@ -230,6 +234,7 @@ impl<B: BlockT> StateStrategy<B> {
 					import_existing: true,
 					skip_execution: true,
 					state: Some(state),
+					verified_finalized: self.verified_finalized_target,
 				};
 				debug!(target: LOG_TARGET, "State download is complete. Import is queued");
 				self.actions.push(SyncingAction::ImportBlocks { origin, blocks: vec![block] });
@@ -389,6 +394,18 @@ impl<B: BlockT> StateStrategy<B> {
 	pub fn is_succeeded(&self) -> bool {
 		self.succeeded
 	}
+
+	/// The target block number for this state sync.
+	#[must_use]
+	pub fn target_number(&self) -> NumberFor<B> {
+		self.state_sync.target_number()
+	}
+
+	/// The target block hash for this state sync.
+	#[must_use]
+	pub fn target_hash(&self) -> B::Hash {
+		self.state_sync.target_hash()
+	}
 }
 
 #[cfg(test)]
@@ -442,6 +459,7 @@ mod test {
 			None,
 			None,
 			false,
+			false,
 			std::iter::empty(),
 			ProtocolName::Static(""),
 		);
@@ -474,6 +492,7 @@ mod test {
 				target_block.header().clone(),
 				None,
 				None,
+				false,
 				false,
 				initial_peers,
 				ProtocolName::Static(""),
@@ -509,6 +528,7 @@ mod test {
 				None,
 				None,
 				false,
+				false,
 				initial_peers,
 				ProtocolName::Static(""),
 			);
@@ -542,6 +562,7 @@ mod test {
 			target_block.header().clone(),
 			None,
 			None,
+			false,
 			false,
 			initial_peers,
 			ProtocolName::Static(""),
@@ -593,6 +614,7 @@ mod test {
 			None,
 			None,
 			false,
+			false,
 			initial_peers,
 			ProtocolName::Static(""),
 		);
@@ -622,6 +644,7 @@ mod test {
 			target_block.header().clone(),
 			None,
 			None,
+			false,
 			false,
 			initial_peers,
 			ProtocolName::Static(""),
@@ -739,6 +762,7 @@ mod test {
 			import_existing: true,
 			skip_execution: true,
 			state: Some(state),
+			verified_finalized: false,
 		};
 		let expected_blocks = vec![expected_block];
 

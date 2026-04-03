@@ -1017,6 +1017,7 @@ where
 	let syncing_strategy = build_polkadot_syncing_strategy(
 		protocol_id.clone(),
 		fork_id,
+		config.role.clone(),
 		&mut net_config,
 		warp_sync_config,
 		block_downloader,
@@ -1338,6 +1339,7 @@ where
 	let syncing_strategy = build_polkadot_syncing_strategy(
 		protocol_id.clone(),
 		fork_id,
+		role.clone(),
 		net_config,
 		warp_sync_config,
 		block_downloader,
@@ -1405,6 +1407,7 @@ where
 pub fn build_polkadot_syncing_strategy<Block, Client, Net>(
 	protocol_id: ProtocolId,
 	fork_id: Option<&str>,
+	role: sc_network::config::Role,
 	net_config: &mut FullNetworkConfiguration<Block, <Block as BlockT>::Hash, Net>,
 	warp_sync_config: Option<WarpSyncConfig<Block>>,
 	block_downloader: Arc<dyn BlockDownloader<Block>>,
@@ -1473,6 +1476,7 @@ where
 
 	let syncing_config = PolkadotSyncingStrategyConfig {
 		mode: net_config.network_config.sync_mode,
+		role,
 		max_parallel_downloads: net_config.network_config.max_parallel_downloads,
 		max_blocks_per_request: net_config.network_config.max_blocks_per_request,
 		min_peers_to_start_warp_sync: net_config.network_config.min_peers_to_start_warp_sync,

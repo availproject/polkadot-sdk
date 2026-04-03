@@ -39,14 +39,13 @@ use sp_runtime::traits::{Block as BlockT, NumberFor};
 
 use crate::{
 	authorities::SharedAuthoritySet,
-	aux_schema::PersistentData,
+	aux_schema::{self, PersistentData},
 	communication::{Network as NetworkT, NetworkBridge, Syncing as SyncingT},
 	environment, global_communication,
 	notification::GrandpaJustificationSender,
-	ClientForGrandpa, CommandOrError, CommunicationIn, Config, Error, LinkHalf, VoterCommand,
-	VoterSetState, LOG_TARGET,
+	AuthoritySet, AuthoritySetChanges, ClientForGrandpa, CommandOrError, CommunicationIn, Config,
+	Error, LinkHalf, VoterCommand, VoterSetState, LOG_TARGET,
 };
-
 struct ObserverChain<'a, Block: BlockT, Client> {
 	client: &'a Arc<Client>,
 	_phantom: PhantomData<Block>,
@@ -120,7 +119,6 @@ where
 		if validation_result.is_valid() {
 			let finalized_hash = commit.target_hash;
 			let finalized_number = commit.target_number;
-
 			// commit is valid, finalize the block it targets
 			match environment::finalize_block(
 				client.clone(),
@@ -134,7 +132,17 @@ where
 				telemetry.clone(),
 			) {
 				Ok(_) => {},
-				Err(e) => return future::err(e),
+				Err(e) => {
+					warn!(
+						target: LOG_TARGET,
+						"Observer failed to finalize valid commit: round={}, target=#{} ({:?}), error={}",
+						round,
+						finalized_number,
+						finalized_hash,
+						e,
+					);
+					return future::err(e)
+				},
 			};
 
 			// note that we've observed completion of this round through the commit,
@@ -334,11 +342,23 @@ where
 				set_state
 			},
 			VoterCommand::ChangeAuthorities(new) => {
+				let authority_set = AuthoritySet::new(
+					new.authorities.clone(),
+					new.set_id,
+					fork_tree::ForkTree::new(),
+					Vec::new(),
+					AuthoritySetChanges::empty(),
+				)
+				.ok_or_else(|| Error::Safety("Invalid authority set during observer rebootstrap".into()))?;
+				*self.persistent_data.authority_set.inner_locked() = authority_set.clone();
+				aux_schema::update_authority_set::<B, _, _>(&authority_set, None, |insert| {
+					self.client.insert_aux(insert, [])
+				})?;
 				// start the new authority set using the block where the
 				// set changed (not where the signal happened!) as the base.
 				let set_state = VoterSetState::live(
 					new.set_id,
-					&*self.persistent_data.authority_set.inner(),
+					&authority_set,
 					(new.canon_hash, new.canon_number),
 				);
 
@@ -352,6 +372,7 @@ where
 		self.rebuild_observer();
 		Ok(())
 	}
+
 }
 
 impl<B, BE, C, N, S> Future for ObserverWork<B, BE, C, N, S>
