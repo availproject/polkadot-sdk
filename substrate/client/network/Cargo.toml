@@ -75,6 +75,7 @@ tokio-stream = { workspace = true }
 unsigned-varint = { features = ["asynchronous_codec", "futures"], workspace = true }
 void = { workspace = true }
 wasm-timer = { workspace = true }
+multihash-codetable = { workspace = true }
 zeroize = { workspace = true, default-features = true }
 
 [dev-dependencies]
