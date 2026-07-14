@@ -36,13 +36,14 @@ use crate::{
 	},
 };
 use clap::{error::ErrorKind, Args, CommandFactory, Parser};
-use codec::Decode;
-// use cumulus_client_parachain_inherent::MockValidationDataInherentDataProvider;
+use codec::{Decode, Encode};
+use cumulus_client_parachain_inherent::MockValidationDataInherentDataProvider;
+use cumulus_primitives_core::RelayParentOffsetApi;
 use fake_runtime_api::RuntimeApi as FakeRuntimeApi;
 use frame_support::Deserialize;
 use genesis_state::WARN_SPEC_GENESIS_CTOR;
 use log::info;
-// use polkadot_parachain_primitives::primitives::Id as ParaId;
+use polkadot_parachain_primitives::primitives::Id as ParaId;
 use sc_block_builder::BlockBuilderApi;
 use sc_chain_spec::{ChainSpec, ChainSpecExtension, GenesisBlockBuilder};
 use sc_cli::{CliConfiguration, Database, ImportParams, Result, SharedParams};
@@ -65,7 +66,7 @@ use sp_runtime::{
 use sp_storage::Storage;
 use sp_wasm_interface::HostFunctions;
 use std::{
-	fmt::{Debug, Display, Formatter},
+	fmt::{Display, Formatter},
 	fs,
 	path::PathBuf,
 	sync::Arc,
@@ -146,6 +147,13 @@ pub struct OverheadParams {
 	/// a para-id and patch the state accordingly.
 	#[arg(long)]
 	pub para_id: Option<u32>,
+
+	/// Path to a JSON file containing a patch to apply to the genesis state.
+	///
+	/// This allows modifying the genesis state after it's built but before benchmarking.
+	/// Useful for creating specific testing scenarios like many accounts for benchmarking.
+	#[arg(long)]
+	pub genesis_patch: Option<PathBuf>,
 }
 
 /// How the genesis state for benchmarking should be built.
@@ -173,7 +181,7 @@ pub(crate) enum BenchmarkType {
 
 /// Hostfunctions that are typically used by parachains.
 pub type ParachainHostFunctions = (
-	// cumulus_primitives_proof_size_hostfunction::storage_proof_size::HostFunctions,
+	cumulus_primitives_proof_size_hostfunction::storage_proof_size::HostFunctions,
 	sp_io::SubstrateHostFunctions,
 );
 
@@ -195,43 +203,43 @@ type OverheadClient<Block, HF> = TFullClient<Block, FakeRuntimeApi, WasmExecutor
 /// inherents are required for every chain. The runtime will pick the ones
 /// it requires based on their identifier.
 fn create_inherent_data<Client: UsageProvider<Block> + HeaderBackend<Block>, Block: BlockT>(
-	_client: &Arc<Client>,
-	_chain_type: &ChainType,
+	client: &Arc<Client>,
+	chain_type: &ChainType,
+	relay_parent_offset: u32,
 ) -> InherentData {
-	// let genesis = client.usage_info().chain.best_hash;
-	// let header = client.header(genesis).unwrap().unwrap();
+	let genesis = client.usage_info().chain.best_hash;
+	let header = client.header(genesis).unwrap().unwrap();
 
 	let mut inherent_data = InherentData::new();
 
 	// Para inherent can only makes sense when we are handling a parachain.
-	// NOTE: Disabling the para_inherent as we dont need this at Avail & it will unnecessary pull polkadot & parachain primitives
-	// if let Parachain(para_id) = chain_type {
-	// 	let parachain_validation_data_provider = MockValidationDataInherentDataProvider::<()> {
-	// 		para_id: ParaId::from(*para_id),
-	// 		current_para_block_head: Some(header.encode().into()),
-	// 		relay_offset: 1,
-	// 		..Default::default()
-	// 	};
-	// 	let _ = futures::executor::block_on(
-	// 		parachain_validation_data_provider.provide_inherent_data(&mut inherent_data),
-	// 	);
-	// }
+	if let Parachain(para_id) = chain_type {
+		let parachain_validation_data_provider = MockValidationDataInherentDataProvider::<()> {
+			para_id: ParaId::from(*para_id),
+			current_para_block_head: Some(header.encode().into()),
+			relay_offset: 0,
+			relay_parent_offset,
+			..Default::default()
+		};
+		let _ = futures::executor::block_on(
+			parachain_validation_data_provider.provide_inherent_data(&mut inherent_data),
+		);
+	}
 
 	// Parachain inherent that is used on relay chains to perform parachain validation.
-
-	// let para_inherent = polkadot_primitives::InherentData {
-	// 	bitfields: Vec::new(),
-	// 	backed_candidates: Vec::new(),
-	// 	disputes: Vec::new(),
-	// 	parent_header: header,
-	// };
+	let para_inherent = polkadot_primitives::InherentData {
+		bitfields: Vec::new(),
+		backed_candidates: Vec::new(),
+		disputes: Vec::new(),
+		parent_header: header,
+	};
 
 	// Timestamp inherent that is very common in substrate chains.
 	let timestamp = sp_timestamp::InherentDataProvider::new(std::time::Duration::default().into());
 
 	let _ = futures::executor::block_on(timestamp.provide_inherent_data(&mut inherent_data));
-	// let _ =
-	// 	inherent_data.put_data(polkadot_primitives::PARACHAINS_INHERENT_IDENTIFIER, &para_inherent);
+	let _ =
+		inherent_data.put_data(polkadot_primitives::PARACHAINS_INHERENT_IDENTIFIER, &para_inherent);
 
 	inherent_data
 }
@@ -274,8 +282,9 @@ impl OverheadCmd {
 		chain_spec_from_api: Option<Box<dyn ChainSpec>>,
 	) -> Result<(GenesisStateHandler, Option<u32>)> {
 		let genesis_builder_to_source = || match self.params.genesis_builder {
-			Some(GenesisBuilderPolicy::Runtime) | Some(GenesisBuilderPolicy::SpecRuntime) =>
-				SpecGenesisSource::Runtime(self.params.genesis_builder_preset.clone()),
+			Some(GenesisBuilderPolicy::Runtime) | Some(GenesisBuilderPolicy::SpecRuntime) => {
+				SpecGenesisSource::Runtime(self.params.genesis_builder_preset.clone())
+			},
 			Some(GenesisBuilderPolicy::SpecGenesis) | None => {
 				log::warn!(target: LOG_TARGET, "{WARN_SPEC_GENESIS_CTOR}");
 				SpecGenesisSource::SpecJson
@@ -287,7 +296,7 @@ impl OverheadCmd {
 			log::debug!(target: LOG_TARGET, "Initializing state handler with chain-spec from API: {:?}", chain_spec);
 
 			let source = genesis_builder_to_source();
-			return Ok((GenesisStateHandler::ChainSpec(chain_spec, source), self.params.para_id))
+			return Ok((GenesisStateHandler::ChainSpec(chain_spec, source), self.params.para_id));
 		};
 
 		// Handle chain-spec passed in via CLI.
@@ -304,7 +313,7 @@ impl OverheadCmd {
 			return Ok((
 				GenesisStateHandler::ChainSpec(chain_spec, source),
 				self.params.para_id.or(para_id_from_chain_spec),
-			))
+			));
 		};
 
 		// Check for runtimes. In general, we make sure that `--runtime` and `--chain` are
@@ -341,13 +350,14 @@ impl OverheadCmd {
 		}
 
 		match self.params.genesis_builder {
-			Some(GenesisBuilderPolicy::SpecGenesis | GenesisBuilderPolicy::SpecRuntime) =>
+			Some(GenesisBuilderPolicy::SpecGenesis | GenesisBuilderPolicy::SpecRuntime) => {
 				if chain_spec.is_none() && self.shared_params.chain.is_none() {
 					return Err((
 						ErrorKind::MissingRequiredArgument,
 						"Provide a chain spec via `--chain`.".to_string(),
 					));
-				},
+				}
+			},
 			_ => {},
 		};
 		Ok(())
@@ -398,6 +408,18 @@ impl OverheadCmd {
 		let (state_handler, para_id) =
 			self.state_handler_from_cli::<(ParachainHostFunctions, ExtraHF)>(chain_spec)?;
 
+		let user_genesis_patcher = if let Some(ref patch_path) = self.params.genesis_patch {
+			let patch_content = fs::read_to_string(patch_path)
+				.map_err(|e| format!("Failed to read genesis patch file: {}", e))?;
+
+			let patch_value: serde_json::Value = serde_json::from_str(&patch_content)
+				.map_err(|e| format!("Failed to parse genesis patch JSON: {}", e))?;
+
+			Some(patch_value)
+		} else {
+			None
+		};
+
 		let executor = WasmExecutor::<(ParachainHostFunctions, ExtraHF)>::builder()
 			.with_allow_missing_host_functions(true)
 			.build();
@@ -415,9 +437,23 @@ impl OverheadCmd {
 		// If we are dealing  with a parachain, make sure that the para id in genesis will
 		// match what we expect.
 		let genesis_patcher = match chain_type {
-			Parachain(para_id) =>
-				Some(Box::new(move |value| patch_genesis(value, Some(para_id))) as Box<_>),
-			_ => None,
+			Parachain(para_id) => Some(Box::new(move |value| {
+				let mut patched_value = patch_genesis(value, Some(para_id));
+
+				if let Some(user_patch) = &user_genesis_patcher {
+					sc_chain_spec::json_patch::merge(&mut patched_value, user_patch.clone());
+				}
+
+				patched_value
+			}) as Box<_>),
+			_ => user_genesis_patcher.map(|user_patch| {
+				Box::new(move |value| {
+					let mut patched_value = value;
+					sc_chain_spec::json_patch::merge(&mut patched_value, user_patch);
+
+					patched_value
+				}) as Box<_>
+			}),
 		};
 
 		let client = self.build_client_components::<Block, (ParachainHostFunctions, ExtraHF)>(
@@ -426,7 +462,19 @@ impl OverheadCmd {
 			&chain_type,
 		)?;
 
-		let inherent_data = create_inherent_data(&client, &chain_type);
+		// Fetch the relay parent offset from the runtime.
+		let relay_parent_offset = {
+			let genesis = client.usage_info().chain.best_hash;
+			client.runtime_api().relay_parent_offset(genesis).unwrap_or_else(|_| {
+				log::debug!(
+					target: LOG_TARGET,
+					"Runtime does not implement RelayParentOffsetApi, using default offset of 0"
+				);
+				0
+			})
+		};
+
+		let inherent_data = create_inherent_data(&client, &chain_type, relay_parent_offset);
 
 		let (ext_builder, runtime_name) = {
 			let genesis = client.usage_info().chain.best_hash;
@@ -491,6 +539,7 @@ impl OverheadCmd {
 			trie_cache_maximum_size: self.trie_cache_maximum_size()?,
 			state_pruning: None,
 			blocks_pruning: BlocksPruning::KeepAll,
+			pruning_filters: Default::default(),
 			source: database_source,
 			metrics_registry: None,
 		})?;
@@ -706,20 +755,20 @@ mod tests {
 		assert_eq!(chain_type.requires_proof_recording(), false);
 	}
 
-	// #[test]
-	// fn test_chain_type_parachain() {
-	// 	let executor: WasmExecutor<ParachainHostFunctions> = WasmExecutor::builder().build();
-	// 	let code_bytes = cumulus_test_runtime::WASM_BINARY
-	// 		.expect("To run this test, build the wasm binary of cumulus-test-runtime")
-	// 		.to_vec();
-	// 	let opaque_metadata =
-	// 		super::fetch_latest_metadata_from_code_blob(&executor, code_bytes.into()).unwrap();
-	// 	let metadata = subxt::Metadata::decode(&mut (*opaque_metadata).as_slice()).unwrap();
-	// 	let chain_type = identify_chain(&metadata, Some(100));
-	// 	assert_eq!(chain_type, ChainType::Parachain(100));
-	// 	assert!(chain_type.requires_proof_recording());
-	// 	assert_eq!(identify_chain(&metadata, None), ChainType::Parachain(DEFAULT_PARA_ID));
-	// }
+	#[test]
+	fn test_chain_type_parachain() {
+		let executor: WasmExecutor<ParachainHostFunctions> = WasmExecutor::builder().build();
+		let code_bytes = cumulus_test_runtime::WASM_BINARY
+			.expect("To run this test, build the wasm binary of cumulus-test-runtime")
+			.to_vec();
+		let opaque_metadata =
+			super::fetch_latest_metadata_from_code_blob(&executor, code_bytes.into()).unwrap();
+		let metadata = subxt::Metadata::decode(&mut (*opaque_metadata).as_slice()).unwrap();
+		let chain_type = identify_chain(&metadata, Some(100));
+		assert_eq!(chain_type, ChainType::Parachain(100));
+		assert!(chain_type.requires_proof_recording());
+		assert_eq!(identify_chain(&metadata, None), ChainType::Parachain(DEFAULT_PARA_ID));
+	}
 
 	#[test]
 	fn test_chain_type_custom() {
@@ -760,6 +809,34 @@ mod tests {
 			"--genesis-builder-preset",
 			"preset",
 		])?;
+
+		// Test genesis-patch with runtime
+		cli_succeed(&[
+			"test",
+			"--runtime",
+			"path/to/runtime",
+			"--genesis-patch",
+			"path/to/patch.json",
+		])?;
+		cli_succeed(&[
+			"test",
+			"--runtime",
+			"path/to/runtime",
+			"--genesis-builder",
+			"runtime",
+			"--genesis-patch",
+			"path/to/patch.json",
+		])?;
+		cli_succeed(&[
+			"test",
+			"--runtime",
+			"path/to/runtime",
+			"--genesis-builder-preset",
+			"preset",
+			"--genesis-patch",
+			"path/to/patch.json",
+		])?;
+
 		cli_fail(&["test", "--runtime", "path/to/spec", "--genesis-builder", "spec"]);
 		cli_fail(&["test", "--runtime", "path/to/spec", "--genesis-builder", "spec-genesis"]);
 		cli_fail(&["test", "--runtime", "path/to/spec", "--genesis-builder", "spec-runtime"]);
@@ -769,6 +846,37 @@ mod tests {
 		cli_succeed(&["test", "--chain", "path/to/spec", "--genesis-builder", "spec"])?;
 		cli_succeed(&["test", "--chain", "path/to/spec", "--genesis-builder", "spec-genesis"])?;
 		cli_succeed(&["test", "--chain", "path/to/spec", "--genesis-builder", "spec-runtime"])?;
+
+		// Test genesis-patch with chain spec
+		cli_succeed(&["test", "--chain", "path/to/spec", "--genesis-patch", "path/to/patch.json"])?;
+		cli_succeed(&[
+			"test",
+			"--chain",
+			"path/to/spec",
+			"--genesis-builder",
+			"spec",
+			"--genesis-patch",
+			"path/to/patch.json",
+		])?;
+		cli_succeed(&[
+			"test",
+			"--chain",
+			"path/to/spec",
+			"--genesis-builder",
+			"spec-genesis",
+			"--genesis-patch",
+			"path/to/patch.json",
+		])?;
+		cli_succeed(&[
+			"test",
+			"--chain",
+			"path/to/spec",
+			"--genesis-builder",
+			"spec-runtime",
+			"--genesis-patch",
+			"path/to/patch.json",
+		])?;
+
 		cli_fail(&["test", "--chain", "path/to/spec", "--genesis-builder", "none"]);
 		cli_fail(&["test", "--chain", "path/to/spec", "--genesis-builder", "runtime"]);
 		cli_fail(&[

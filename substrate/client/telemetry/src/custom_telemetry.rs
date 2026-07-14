@@ -14,8 +14,9 @@ use libp2p::PeerId;
 use serde::Serialize;
 use wasm_timer::{SystemTime, UNIX_EPOCH};
 
-use crate::custom_telemetry::external::BlockIntervalFromNode;
-use crate::{telemetry, TelemetryHandle, SUBSTRATE_INFO};
+use crate::{
+	custom_telemetry::external::BlockIntervalFromNode, telemetry, TelemetryHandle, SUBSTRATE_INFO,
+};
 
 ///
 #[repr(u8)]
@@ -184,9 +185,9 @@ impl BlockMetrics {
 	fn is_interval_ready(blocks: &BTreeMap<String, BlockIntervals>) -> bool {
 		let mut done = true;
 		for (_, block) in blocks {
-			let count = block.proposal.is_some() as u32
-				+ block.import.is_some() as u32
-				+ block.sync.is_some() as u32;
+			let count = block.proposal.is_some() as u32 +
+				block.import.is_some() as u32 +
+				block.sync.is_some() as u32;
 
 			if count < 2 {
 				done = false;

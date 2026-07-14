@@ -97,14 +97,14 @@ where
 			},
 			voter::CommunicationIn::CatchUp(..) => {
 				// ignore catch up messages
-				return future::ok(last_finalized_number)
+				return future::ok(last_finalized_number);
 			},
 		};
 
 		// if the commit we've received targets a block lower or equal to the last
 		// finalized, ignore it and continue with the current state
 		if commit.target_number <= last_finalized_number {
-			return future::ok(last_finalized_number)
+			return future::ok(last_finalized_number);
 		}
 
 		let validation_result = match finality_grandpa::validate_commit(
@@ -141,7 +141,7 @@ where
 						finalized_hash,
 						e,
 					);
-					return future::err(e)
+					return future::err(e);
 				},
 			};
 
@@ -349,7 +349,9 @@ where
 					Vec::new(),
 					AuthoritySetChanges::empty(),
 				)
-				.ok_or_else(|| Error::Safety("Invalid authority set during observer rebootstrap".into()))?;
+				.ok_or_else(|| {
+					Error::Safety("Invalid authority set during observer rebootstrap".into())
+				})?;
 				*self.persistent_data.authority_set.inner_locked() = authority_set.clone();
 				aux_schema::update_authority_set::<B, _, _>(&authority_set, None, |insert| {
 					self.client.insert_aux(insert, [])
@@ -372,7 +374,6 @@ where
 		self.rebuild_observer();
 		Ok(())
 	}
-
 }
 
 impl<B, BE, C, N, S> Future for ObserverWork<B, BE, C, N, S>
@@ -392,11 +393,11 @@ where
 			Poll::Ready(Ok(())) => {
 				// observer commit stream doesn't conclude naturally; this could reasonably be an
 				// error.
-				return Poll::Ready(Ok(()))
+				return Poll::Ready(Ok(()));
 			},
 			Poll::Ready(Err(CommandOrError::Error(e))) => {
 				// return inner observer error
-				return Poll::Ready(Err(e))
+				return Poll::Ready(Err(e));
 			},
 			Poll::Ready(Err(CommandOrError::VoterCommand(command))) => {
 				// some command issued internally
@@ -409,7 +410,7 @@ where
 			Poll::Pending => {},
 			Poll::Ready(None) => {
 				// the `voter_commands_rx` stream should never conclude since it's never closed.
-				return Poll::Ready(Ok(()))
+				return Poll::Ready(Ok(()));
 			},
 			Poll::Ready(Some(command)) => {
 				// some command issued externally

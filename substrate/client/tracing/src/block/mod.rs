@@ -26,7 +26,7 @@ use std::{
 	time::Instant,
 };
 
-use codec::{Decode, Encode};
+use codec::Encode;
 use parking_lot::Mutex;
 use tracing::{
 	dispatcher,
@@ -35,18 +35,16 @@ use tracing::{
 };
 
 use crate::{SpanDatum, TraceEvent, Values};
-use frame_metadata::{RuntimeMetadata, RuntimeMetadataPrefixed};
 use sc_client_api::BlockBackend;
-use sp_api::{ApiExt, Core, Metadata, ProofRecorder, ProvideRuntimeApi};
+use sp_api::{Core, ProvideRuntimeApi};
 use sp_blockchain::HeaderBackend;
-use sp_core::{hexdisplay::HexDisplay, OpaqueMetadata};
+use sp_core::hexdisplay::HexDisplay;
 use sp_rpc::tracing::{BlockTrace, Span, TraceBlockResponse};
 use sp_runtime::{
 	generic::BlockId,
 	traits::{Block as BlockT, Header},
 };
 use sp_tracing::{WASM_NAME_KEY, WASM_TARGET_KEY, WASM_TRACE_IDENTIFIER};
-use sp_trie::proof_size_extension::ProofSizeExt;
 
 // Default to only pallet, frame support and state related traces
 const DEFAULT_TARGETS: &str = "pallet,frame,state";
@@ -54,9 +52,46 @@ const TRACE_TARGET: &str = "block_trace";
 // The name of a field required for all events.
 const REQUIRED_EVENT_FIELD: &str = "method";
 
-/// The identifier of the signed extension used to reclaim storage weights.
-/// If this is found in the metadata, we need to enable proof recording during tracing.
-const PARACHAIN_EXTENSION_INDICATOR: &str = "StorageWeightReclaim";
+/// Something that can execute a block in a tracing context.
+pub trait TracingExecuteBlock<Block: BlockT>: Send + Sync {
+	/// Execute the given `block`.
+	///
+	/// The `block` is prepared to be executed right away, this means that any `Seal` was already
+	/// removed from the header. As this changes the `hash` of the block, `orig_hash` is passed
+	/// alongside to the callee.
+	///
+	/// The execution should be done sync on the same thread, because the caller will register
+	/// special tracing collectors.
+	fn execute_block(&self, orig_hash: Block::Hash, block: Block) -> sp_blockchain::Result<()>;
+}
+
+/// Default implementation of [`ExecuteBlock`].
+///
+/// Uses [`Core::execute_block`] to directly execute a block.
+struct DefaultExecuteBlock<Client> {
+	client: Arc<Client>,
+}
+
+impl<Client> DefaultExecuteBlock<Client> {
+	/// Creates a new instance.
+	pub fn new(client: Arc<Client>) -> Self {
+		Self { client }
+	}
+}
+
+impl<Client, Block> TracingExecuteBlock<Block> for DefaultExecuteBlock<Client>
+where
+	Client: ProvideRuntimeApi<Block> + Send + Sync + 'static,
+	Client::Api: Core<Block>,
+	Block: BlockT,
+{
+	fn execute_block(&self, _: Block::Hash, block: Block) -> sp_blockchain::Result<()> {
+		self.client
+			.runtime_api()
+			.execute_block(*block.header().parent_hash(), block.into())
+			.map_err(Into::into)
+	}
+}
 
 /// Tracing Block Result type alias
 pub type TraceBlockResult<T> = Result<T, Error>;
@@ -100,13 +135,15 @@ impl BlockSubscriber {
 impl Subscriber for BlockSubscriber {
 	fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
 		if !metadata.is_span() && metadata.fields().field(REQUIRED_EVENT_FIELD).is_none() {
-			return false
+			return false;
 		}
+
 		for (target, level) in &self.targets {
 			if metadata.level() <= level && metadata.target().starts_with(target) {
-				return true
+				return true;
 			}
 		}
+
 		false
 	}
 
@@ -173,34 +210,7 @@ pub struct BlockExecutor<Block: BlockT, Client> {
 	targets: Option<String>,
 	storage_keys: Option<String>,
 	methods: Option<String>,
-	record_proof: bool,
-}
-
-/// Decode the metadata and check if the runtime has the storage weight reclaim extension enabled.
-/// If it has, proof recording needs to be enabled during tracing.
-/// This check is best effort since we rely on a string identifier. This check exists for backwards
-/// compatibility, versions more recent than `stable2509` of polkadot-sdk will have proof recording
-/// manually enabled for parachains.
-fn is_parachain(metadata: OpaqueMetadata) -> bool {
-	if let Ok(meta) = RuntimeMetadataPrefixed::decode(&mut metadata.as_ref()) {
-		match meta.1 {
-			RuntimeMetadata::V14(v14) =>
-				v14.extrinsic.signed_extensions.iter().any(|signed_ext| {
-					signed_ext.identifier.starts_with(PARACHAIN_EXTENSION_INDICATOR)
-				}),
-			RuntimeMetadata::V15(v15) =>
-				v15.extrinsic.signed_extensions.iter().any(|signed_ext| {
-					signed_ext.identifier.starts_with(PARACHAIN_EXTENSION_INDICATOR)
-				}),
-			RuntimeMetadata::V16(v16) =>
-				v16.extrinsic.transaction_extensions.iter().any(|signed_ext| {
-					signed_ext.identifier.starts_with(PARACHAIN_EXTENSION_INDICATOR)
-				}),
-			_ => false,
-		}
-	} else {
-		false
-	}
+	execute_block: Arc<dyn TracingExecuteBlock<Block>>,
 }
 
 impl<Block, Client> BlockExecutor<Block, Client>
@@ -212,7 +222,7 @@ where
 		+ Send
 		+ Sync
 		+ 'static,
-	Client::Api: Metadata<Block>,
+	Client::Api: Core<Block>,
 {
 	/// Create a new `BlockExecutor`
 	pub fn new(
@@ -221,20 +231,24 @@ where
 		targets: Option<String>,
 		storage_keys: Option<String>,
 		methods: Option<String>,
+		execute_block: Option<Arc<dyn TracingExecuteBlock<Block>>>,
 	) -> Self {
-		// Detect if this is tracing a parachain block.
-		// Parachains need to have proof recording enabled to trace blocks.
-		let record_proof =
-			client.runtime_api().metadata(block).ok().map(is_parachain).unwrap_or_default();
-
-		Self { client, block, targets, storage_keys, methods, record_proof }
+		Self {
+			client: client.clone(),
+			block,
+			targets,
+			storage_keys,
+			methods,
+			execute_block: execute_block
+				.unwrap_or_else(|| Arc::new(DefaultExecuteBlock::new(client))),
+		}
 	}
 
 	/// Execute block, record all spans and events belonging to `Self::targets`
 	/// and filter out events which do not have keys starting with one of the
 	/// prefixes in `Self::storage_keys`.
 	pub fn trace_block(&self) -> TraceBlockResult<TraceBlockResponse> {
-		tracing::debug!(target: "state_tracing", proof_recording_enabled = self.record_proof, "Tracing block: {}", self.block);
+		tracing::debug!(target: "state_tracing", "Tracing block: {}", self.block);
 		// Prepare the block
 		let mut header = self
 			.client
@@ -264,27 +278,15 @@ where
 				extrinsics_len = block.extrinsics().len(),
 			);
 			let _guard = dispatcher_span.enter();
+
 			if let Err(e) = dispatcher::with_default(&dispatch, || {
 				let span = tracing::info_span!(target: TRACE_TARGET, "trace_block");
 				let _enter = span.enter();
-
-				if self.record_proof {
-					// This is a parachain runtime - enable proof recording
-					let mut runtime_api = self.client.runtime_api();
-					let storage_proof_recorder = ProofRecorder::<Block>::default();
-					runtime_api
-						.register_extension(ProofSizeExt::new(storage_proof_recorder.clone()));
-					runtime_api.record_proof_with_recorder(storage_proof_recorder);
-					runtime_api.execute_block(parent_hash, block)
-				} else {
-					// This is a solochain runtime - execute normally
-					self.client.runtime_api().execute_block(parent_hash, block)
-				}
+				self.execute_block.execute_block(self.block, block)
 			}) {
 				return Err(Error::Dispatch(format!(
-					"Failed to collect traces and execute block: {}",
-					e
-				)))
+					"Failed to collect traces and execute block: {e:?}"
+				)));
 			}
 		}
 
@@ -359,9 +361,10 @@ fn patch_and_filter(mut span: SpanDatum, targets: &str) -> Option<Span> {
 			span.target = t;
 		}
 		if !check_target(targets, &span.target, &span.level) {
-			return None
+			return None;
 		}
 	}
+
 	Some(span.into())
 }
 
@@ -369,9 +372,10 @@ fn patch_and_filter(mut span: SpanDatum, targets: &str) -> Option<Span> {
 fn check_target(targets: &str, target: &str, level: &Level) -> bool {
 	for (t, l) in targets.split(',').map(crate::parse_target) {
 		if target.starts_with(t.as_str()) && level <= &l {
-			return true
+			return true;
 		}
 	}
+
 	false
 }
 
@@ -379,32 +383,5 @@ fn block_id_as_string<T: BlockT>(block_id: BlockId<T>) -> String {
 	match block_id {
 		BlockId::Hash(h) => HexDisplay::from(&h.encode()).to_string(),
 		BlockId::Number(n) => HexDisplay::from(&n.encode()).to_string(),
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-
-	#[test]
-	fn test_is_parachain_with_parachain_metadata() {
-		// Read parachain metadata from SCALE-encoded file in fixtures directory
-		let metadata_bytes = std::fs::read("src/block/fixtures/parachain_metadata.scale")
-			.expect("parachain_metadata.scale should exist in fixtures directory");
-		let opaque = OpaqueMetadata::new(metadata_bytes);
-
-		let result = is_parachain(opaque);
-		assert!(result, "Should detect parachain metadata as parachain");
-	}
-
-	#[test]
-	fn test_is_parachain_with_relay_chain_metadata() {
-		// Read relay chain metadata from SCALE-encoded file in fixtures directory
-		let metadata_bytes = std::fs::read("src/block/fixtures/relay_chain_metadata.scale")
-			.expect("relay_chain_metadata.scale should exist in fixtures directory");
-		let opaque = OpaqueMetadata::new(metadata_bytes);
-
-		let result = is_parachain(opaque);
-		assert!(!result, "Should not detect relay chain metadata as parachain");
 	}
 }

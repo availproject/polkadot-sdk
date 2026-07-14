@@ -225,7 +225,10 @@ impl Configuration {
 	/// Returns true if the genesis state writing will be skipped while initializing the genesis
 	/// block.
 	pub fn no_genesis(&self) -> bool {
-		matches!(self.network.sync_mode, SyncMode::AvailLight | SyncMode::LightState { .. } | SyncMode::Warp { .. })
+		matches!(
+			self.network.sync_mode,
+			SyncMode::AvailLight | SyncMode::LightState { .. } | SyncMode::Warp { .. }
+		)
 	}
 
 	/// Returns the database config for creating the backend.
@@ -235,6 +238,7 @@ impl Configuration {
 			state_pruning: self.state_pruning.clone(),
 			source: self.database.clone(),
 			blocks_pruning: self.blocks_pruning,
+			pruning_filters: Default::default(),
 			metrics_registry: self.prometheus_registry().cloned(),
 		}
 	}
@@ -340,6 +344,8 @@ pub struct RpcConfiguration {
 	pub rate_limit_whitelisted_ips: Vec<IpNetwork>,
 	/// RPC rate limit trust proxy headers.
 	pub rate_limit_trust_proxy_headers: bool,
+	/// RPC logger capacity (default: 1024).
+	pub request_logger_limit: u32,
 }
 
 /// Runtime executor configuration.

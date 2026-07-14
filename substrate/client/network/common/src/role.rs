@@ -80,7 +80,7 @@ impl std::fmt::Display for Role {
 		match self {
 			Self::Full => write!(f, "FULL"),
 			Self::Authority => write!(f, "AUTHORITY"),
-			Self::LightClient => write!(f, "LIGHT_CLIENT")
+			Self::LightClient => write!(f, "LIGHT_CLIENT"),
 		}
 	}
 }

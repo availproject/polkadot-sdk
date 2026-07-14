@@ -48,8 +48,9 @@ fn chain_sync_mode(sync_mode: SyncMode) -> ChainSyncMode {
 	match sync_mode {
 		SyncMode::Full => ChainSyncMode::Full,
 		SyncMode::AvailLight => ChainSyncMode::AvailLight,
-		SyncMode::LightState { skip_proofs, storage_chain_mode } =>
-			ChainSyncMode::LightState { skip_proofs, storage_chain_mode },
+		SyncMode::LightState { skip_proofs, storage_chain_mode } => {
+			ChainSyncMode::LightState { skip_proofs, storage_chain_mode }
+		},
 		SyncMode::Warp => ChainSyncMode::Full,
 	}
 }
@@ -76,6 +77,9 @@ where
 	pub state_request_protocol_name: ProtocolName,
 	/// Block downloader
 	pub block_downloader: Arc<dyn BlockDownloader<Block>>,
+	/// Whether to archive blocks. When `true`, gap sync requests bodies to maintain complete
+	/// block history.
+	pub archive_blocks: bool,
 }
 
 /// Proxy to specific syncing strategies used in Polkadot.
@@ -85,7 +89,7 @@ pub struct PolkadotSyncingStrategy<B: BlockT, Client> {
 	/// Client used by syncing strategies.
 	client: Arc<Client>,
 	/// Warp strategy.
-	warp: Option<WarpSync<B, Client>>,
+	warp: Option<WarpSync<B>>,
 	/// State strategy.
 	state: Option<StateStrategy<B>>,
 	/// `ChainSync` strategy.`
@@ -191,7 +195,7 @@ where
 		response: Box<dyn Any + Send>,
 	) {
 		match key {
-			StateStrategy::<B>::STRATEGY_KEY =>
+			StateStrategy::<B>::STRATEGY_KEY => {
 				if let Some(state) = &mut self.state {
 					let Ok(response) = response.downcast::<Vec<u8>>() else {
 						warn!(target: LOG_TARGET, "Failed to downcast state response");
@@ -209,8 +213,9 @@ where
 						 or corresponding strategy is not active.",
 					);
 					debug_assert!(false);
-				},
-			WarpSync::<B, Client>::STRATEGY_KEY =>
+				}
+			},
+			WarpSync::<B>::STRATEGY_KEY => {
 				if let Some(warp) = &mut self.warp {
 					warp.on_generic_response(peer_id, protocol_name, response);
 				} else {
@@ -220,8 +225,9 @@ where
 						 or warp strategy is not active",
 					);
 					debug_assert!(false);
-				},
-			ChainSync::<B, Client>::STRATEGY_KEY =>
+				}
+			},
+			ChainSync::<B, Client>::STRATEGY_KEY => {
 				if let Some(chain_sync) = &mut self.chain_sync {
 					chain_sync.on_generic_response(peer_id, key, protocol_name, response);
 				} else {
@@ -231,7 +237,8 @@ where
 						 or corresponding strategy is not active.",
 					);
 					debug_assert!(false);
-				},
+				}
+			},
 			key => {
 				warn!(
 					target: LOG_TARGET,
@@ -383,6 +390,7 @@ where
 				config.max_blocks_per_request,
 				config.state_request_protocol_name.clone(),
 				config.block_downloader.clone(),
+				config.archive_blocks,
 				config.metrics_registry.as_ref(),
 				std::iter::empty(),
 			)?;
@@ -436,6 +444,7 @@ where
 						self.config.max_blocks_per_request,
 						self.config.state_request_protocol_name.clone(),
 						self.config.block_downloader.clone(),
+						self.config.archive_blocks,
 						self.config.metrics_registry.as_ref(),
 						self.peer_best_blocks.iter().map(|(peer_id, (best_hash, best_number))| {
 							(*peer_id, *best_hash, *best_number)
@@ -444,7 +453,7 @@ where
 						Ok(chain_sync) => chain_sync,
 						Err(e) => {
 							error!(target: LOG_TARGET, "Failed to start `ChainSync`.");
-							return Err(e)
+							return Err(e);
 						},
 					};
 
@@ -455,7 +464,9 @@ where
 			}
 		} else if let Some(state) = &self.state {
 			if state.is_succeeded() {
-				if matches!(self.config.mode, SyncMode::Warp) && matches!(self.config.role, Role::LightClient) {
+				if matches!(self.config.mode, SyncMode::Warp) &&
+					matches!(self.config.role, Role::LightClient)
+				{
 					info!(
 						target: LOG_TARGET,
 						"State sync is complete, continuing with avail-light sync from the warp target."
@@ -480,6 +491,7 @@ where
 				self.config.max_blocks_per_request,
 				self.config.state_request_protocol_name.clone(),
 				self.config.block_downloader.clone(),
+				self.config.archive_blocks,
 				self.config.metrics_registry.as_ref(),
 				self.peer_best_blocks.iter().map(|(peer_id, (best_hash, best_number))| {
 					(*peer_id, *best_hash, *best_number)
@@ -492,12 +504,12 @@ where
 				},
 			};
 
-				if matches!(self.config.mode, SyncMode::Warp) &&
-					matches!(self.config.role, Role::LightClient) &&
-					state.is_succeeded()
-				{
-					chain_sync.set_live_anchor(state.target_hash(), state.target_number());
-				}
+			if matches!(self.config.mode, SyncMode::Warp) &&
+				matches!(self.config.role, Role::LightClient) &&
+				state.is_succeeded()
+			{
+				chain_sync.set_live_anchor(state.target_hash(), state.target_number());
+			}
 
 			self.state = None;
 			self.chain_sync = Some(chain_sync);

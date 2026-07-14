@@ -15,74 +15,95 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::vm::Ext;
-use core::{cmp::min, ops::Range};
-use revm::{
-	context_interface::{context::StateLoad, journaled_state::AccountLoad},
-	interpreter::{
-		gas as revm_gas,
-		interpreter_types::{MemoryTr, RuntimeFlag, StackTr},
-		Interpreter,
+use crate::{
+	Pallet, RuntimeCosts,
+	precompiles::{All as AllPrecompiles, Precompiles},
+	vm::{
+		Ext,
+		evm::{Interpreter, interpreter::Halt, util::as_usize_or_halt},
 	},
-	primitives::{hardfork::SpecId::*, U256},
 };
+use core::ops::{ControlFlow, Range};
+use revm::interpreter::interpreter_action::CallScheme;
+use sp_core::{H160, U256};
 
 /// Gets memory input and output ranges for call instructions.
-#[inline]
-pub fn get_memory_input_and_out_ranges<'a, E: Ext>(
-	interpreter: &mut Interpreter<crate::vm::evm::EVMInterpreter<'a, E>>,
-) -> Option<(Range<usize>, Range<usize>)> {
-	popn!([in_offset, in_len, out_offset, out_len], interpreter, None);
-
-	let mut in_range = resize_memory(interpreter, in_offset, in_len)?;
-
-	if !in_range.is_empty() {
-		let offset = <_ as MemoryTr>::local_memory_offset(&interpreter.memory);
-		in_range = in_range.start.saturating_add(offset)..in_range.end.saturating_add(offset);
-	}
-
+pub fn get_memory_in_and_out_ranges<'a, E: Ext>(
+	interpreter: &mut Interpreter<'a, E>,
+) -> ControlFlow<Halt, (Range<usize>, Range<usize>)> {
+	let [in_offset, in_len, out_offset, out_len] = interpreter.stack.popn()?;
+	let in_range = resize_memory(interpreter, in_offset, in_len)?;
 	let ret_range = resize_memory(interpreter, out_offset, out_len)?;
-	Some((in_range, ret_range))
+	ControlFlow::Continue((in_range, ret_range))
 }
 
 /// Resize memory and return range of memory.
 /// If `len` is 0 dont touch memory and return `usize::MAX` as offset and 0 as length.
-#[inline]
 pub fn resize_memory<'a, E: Ext>(
-	interpreter: &mut Interpreter<crate::vm::evm::EVMInterpreter<'a, E>>,
+	interpreter: &mut Interpreter<'a, E>,
 	offset: U256,
 	len: U256,
-) -> Option<Range<usize>> {
-	let len = as_usize_or_fail_ret!(interpreter, len, None);
-	let offset = if len != 0 {
-		let offset = as_usize_or_fail_ret!(interpreter, offset, None);
-		resize_memory!(interpreter, offset, len, None);
-		offset
+) -> ControlFlow<Halt, Range<usize>> {
+	let len = as_usize_or_halt::<E::T>(len)?;
+	if len != 0 {
+		let offset = as_usize_or_halt::<E::T>(offset)?;
+		interpreter.memory.resize(offset, len)?;
+		ControlFlow::Continue(offset..offset + len)
 	} else {
-		usize::MAX //unrealistic value so we are sure it is not used
-	};
-	Some(offset..offset + len)
+		// unrealistic value so we are sure it is not used
+		ControlFlow::Continue(usize::MAX..usize::MAX)
+	}
 }
 
 /// Calculates gas cost and limit for call instructions.
-#[inline]
-pub fn calc_call_gas<'a, E: Ext>(
-	interpreter: &mut Interpreter<crate::vm::evm::EVMInterpreter<'a, E>>,
-	account_load: StateLoad<AccountLoad>,
-	has_transfer: bool,
-	local_gas_limit: u64,
-) -> Option<u64> {
-	let call_cost =
-		revm_gas::call_cost(interpreter.runtime_flag.spec_id(), has_transfer, account_load);
-	gas_legacy!(interpreter, call_cost, None);
+pub fn charge_call_gas<'a, E: Ext>(
+	interpreter: &mut Interpreter<'a, E>,
+	callee: H160,
+	scheme: CallScheme,
+	input_len: usize,
+	value: U256,
+) -> ControlFlow<Halt, ()> {
+	let precompile = <AllPrecompiles<E::T>>::get::<E>(&callee.as_fixed_bytes());
 
-	// EIP-150: Gas cost changes for IO-heavy operations
-	let gas_limit = if interpreter.runtime_flag.spec_id().is_enabled_in(TANGERINE) {
-		// Take l64 part of gas_limit
-		min(interpreter.gas.remaining_63_of_64_parts(), local_gas_limit)
-	} else {
-		local_gas_limit
+	match precompile {
+		Some(precompile) => {
+			// Base cost depending on contract info
+			interpreter.ext.frame_meter_mut().charge_or_halt(
+				if precompile.has_contract_info() {
+					RuntimeCosts::PrecompileWithInfoBase
+				} else {
+					RuntimeCosts::PrecompileBase
+				},
+			)?;
+
+			// Cost for decoding input
+			interpreter
+				.ext
+				.frame_meter_mut()
+				.charge_or_halt(RuntimeCosts::PrecompileDecode(input_len as u32))?;
+		},
+		None => {
+			// Regular CALL / DELEGATECALL base cost / CALLCODE not supported
+			interpreter.ext.charge_or_halt(if scheme.is_delegate_call() {
+				RuntimeCosts::DelegateCallBase
+			} else {
+				RuntimeCosts::CallBase
+			})?;
+
+			interpreter
+				.ext
+				.frame_meter_mut()
+				.charge_or_halt(RuntimeCosts::CopyFromContract(input_len as u32))?;
+		},
 	};
+	if !value.is_zero() {
+		interpreter
+			.ext
+			.frame_meter_mut()
+			.charge_or_halt(RuntimeCosts::CallTransferSurcharge {
+				dust_transfer: Pallet::<E::T>::has_dust(value),
+			})?;
+	}
 
-	Some(gas_limit)
+	ControlFlow::Continue(())
 }

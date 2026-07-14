@@ -20,19 +20,20 @@
 //! Provides functions for starting a collator node or a normal full node.
 
 use cumulus_client_cli::CollatorOptions;
-use cumulus_client_consensus_common::ParachainConsensus;
 use cumulus_client_network::{AssumeSybilResistance, RequireSecondedInBlockAnnounce};
 use cumulus_client_pov_recovery::{PoVRecovery, RecoveryDelayRange, RecoveryHandle};
+use cumulus_client_proof_size_recording::load_proof_size_recording;
 use cumulus_primitives_core::{CollectCollationInfo, ParaId};
 pub use cumulus_primitives_proof_size_hostfunction::storage_proof_size;
 use cumulus_relay_chain_inprocess_interface::build_inprocess_relay_chain;
 use cumulus_relay_chain_interface::{RelayChainInterface, RelayChainResult};
 use cumulus_relay_chain_minimal_node::build_minimal_relay_chain_node_with_rpc;
 use futures::{channel::mpsc, StreamExt};
-use polkadot_primitives::{vstaging::CandidateEvent, CollatorPair, OccupiedCoreAssumption};
+use polkadot_primitives::{CandidateEvent, CollatorPair, OccupiedCoreAssumption};
 use prometheus::{Histogram, HistogramOpts, Registry};
 use sc_client_api::{
-	Backend as BackendT, BlockBackend, BlockchainEvents, Finalizer, ProofProvider, UsageProvider,
+	AuxStore, Backend as BackendT, BlockBackend, BlockchainEvents, Finalizer, ProofProvider,
+	UsageProvider,
 };
 use sc_consensus::{
 	import_queue::{ImportQueue, ImportQueueService},
@@ -44,16 +45,20 @@ use sc_network::{
 };
 use sc_network_sync::SyncingService;
 use sc_network_transactions::TransactionsHandlerController;
-use sc_service::{Configuration, SpawnTaskHandle, TaskManager, WarpSyncConfig};
+use sc_service::{
+	Configuration, SpawnEssentialTaskHandle, SpawnTaskHandle, TaskManager, WarpSyncConfig,
+};
 use sc_telemetry::{log, TelemetryWorkerHandle};
+use sc_tracing::block::TracingExecuteBlock;
 use sc_utils::mpsc::TracingUnboundedSender;
-use sp_api::ProvideRuntimeApi;
+use sp_api::{ApiExt, Core, ProofRecorder, ProvideRuntimeApi};
 use sp_blockchain::{HeaderBackend, HeaderMetadata};
-use sp_core::{traits::SpawnNamed, Decode};
+use sp_core::Decode;
 use sp_runtime::{
 	traits::{Block as BlockT, BlockIdTo, Header},
 	SaturatedConversion, Saturating,
 };
+use sp_trie::proof_size_extension::{ProofSizeExt, ReplayProofSizeProvider};
 use std::{
 	sync::Arc,
 	time::{Duration, Instant},
@@ -66,6 +71,7 @@ use std::{
 pub type ParachainHostFunctions = (
 	cumulus_primitives_proof_size_hostfunction::storage_proof_size::HostFunctions,
 	sp_io::SubstrateHostFunctions,
+	sp_crypto_ec_utils::HostFunctionsRfc163,
 );
 
 // Given the sporadic nature of the explicit recovery operation and the
@@ -86,23 +92,6 @@ pub enum DARecoveryProfile {
 	Other(RecoveryDelayRange),
 }
 
-pub struct StartCollatorParams<'a, Block: BlockT, BS, Client, RCInterface, Spawner> {
-	pub block_status: Arc<BS>,
-	pub client: Arc<Client>,
-	pub announce_block: Arc<dyn Fn(Block::Hash, Option<Vec<u8>>) + Send + Sync>,
-	pub spawner: Spawner,
-	pub para_id: ParaId,
-	pub relay_chain_interface: RCInterface,
-	pub task_manager: &'a mut TaskManager,
-	pub parachain_consensus: Box<dyn ParachainConsensus<Block>>,
-	pub import_queue: Box<dyn ImportQueueService<Block>>,
-	pub collator_key: CollatorPair,
-	pub relay_chain_slot_duration: Duration,
-	pub recovery_handle: Box<dyn RecoveryHandle>,
-	pub sync_service: Arc<SyncingService<Block>>,
-	pub prometheus_registry: Option<&'a Registry>,
-}
-
 /// Parameters given to [`start_relay_chain_tasks`].
 pub struct StartRelayChainTasksParams<'a, Block: BlockT, Client, RCInterface> {
 	pub client: Arc<Client>,
@@ -116,96 +105,6 @@ pub struct StartRelayChainTasksParams<'a, Block: BlockT, Client, RCInterface> {
 	pub recovery_handle: Box<dyn RecoveryHandle>,
 	pub sync_service: Arc<SyncingService<Block>>,
 	pub prometheus_registry: Option<&'a Registry>,
-}
-
-/// Parameters given to [`start_full_node`].
-pub struct StartFullNodeParams<'a, Block: BlockT, Client, RCInterface> {
-	pub para_id: ParaId,
-	pub client: Arc<Client>,
-	pub relay_chain_interface: RCInterface,
-	pub task_manager: &'a mut TaskManager,
-	pub announce_block: Arc<dyn Fn(Block::Hash, Option<Vec<u8>>) + Send + Sync>,
-	pub relay_chain_slot_duration: Duration,
-	pub import_queue: Box<dyn ImportQueueService<Block>>,
-	pub recovery_handle: Box<dyn RecoveryHandle>,
-	pub sync_service: Arc<SyncingService<Block>>,
-	pub prometheus_registry: Option<&'a Registry>,
-}
-
-/// Start a collator node for a parachain.
-///
-/// A collator is similar to a validator in a normal blockchain.
-/// It is responsible for producing blocks and sending the blocks to a
-/// parachain validator for validation and inclusion into the relay chain.
-#[deprecated = "use start_relay_chain_tasks instead"]
-pub async fn start_collator<'a, Block, BS, Client, Backend, RCInterface, Spawner>(
-	StartCollatorParams {
-		block_status,
-		client,
-		announce_block,
-		spawner,
-		para_id,
-		task_manager,
-		relay_chain_interface,
-		parachain_consensus,
-		import_queue,
-		collator_key,
-		relay_chain_slot_duration,
-		recovery_handle,
-		sync_service,
-		prometheus_registry,
-	}: StartCollatorParams<'a, Block, BS, Client, RCInterface, Spawner>,
-) -> sc_service::error::Result<()>
-where
-	Block: BlockT,
-	BS: BlockBackend<Block> + Send + Sync + 'static,
-	Client: Finalizer<Block, Backend>
-		+ UsageProvider<Block>
-		+ HeaderBackend<Block>
-		+ Send
-		+ Sync
-		+ BlockBackend<Block>
-		+ BlockchainEvents<Block>
-		+ ProvideRuntimeApi<Block>
-		+ 'static,
-	Client::Api: CollectCollationInfo<Block>,
-	for<'b> &'b Client: BlockImport<Block>,
-	Spawner: SpawnNamed + Clone + Send + Sync + 'static,
-	RCInterface: RelayChainInterface + Clone + 'static,
-	Backend: BackendT<Block> + 'static,
-{
-	let overseer_handle = relay_chain_interface
-		.overseer_handle()
-		.map_err(|e| sc_service::Error::Application(Box::new(e)))?;
-
-	start_relay_chain_tasks(StartRelayChainTasksParams {
-		client: client.clone(),
-		announce_block: announce_block.clone(),
-		para_id,
-		task_manager,
-		da_recovery_profile: DARecoveryProfile::Collator,
-		relay_chain_interface,
-		import_queue,
-		relay_chain_slot_duration,
-		recovery_handle,
-		sync_service,
-		prometheus_registry,
-	})?;
-
-	#[allow(deprecated)]
-	cumulus_client_collator::start_collator(cumulus_client_collator::StartCollatorParams {
-		runtime_api: client,
-		block_status,
-		announce_block,
-		overseer_handle,
-		spawner,
-		para_id,
-		key: collator_key,
-		parachain_consensus,
-	})
-	.await;
-
-	Ok(())
 }
 
 /// Start necessary consensus tasks related to the relay chain.
@@ -248,17 +147,14 @@ where
 {
 	let (recovery_chan_tx, recovery_chan_rx) = mpsc::channel(RECOVERY_CHAN_SIZE);
 
-	let consensus = cumulus_client_consensus_common::run_parachain_consensus(
+	cumulus_client_consensus_common::spawn_parachain_consensus_tasks(
 		para_id,
 		client.clone(),
 		relay_chain_interface.clone(),
 		announce_block.clone(),
 		Some(recovery_chan_tx),
+		task_manager.spawn_essential_handle(),
 	);
-
-	task_manager
-		.spawn_essential_handle()
-		.spawn_blocking("cumulus-consensus", None, consensus);
 
 	let da_recovery_profile = match da_recovery_profile {
 		DARecoveryProfile::Collator => {
@@ -312,62 +208,6 @@ where
 	Ok(())
 }
 
-/// Start a full node for a parachain.
-///
-/// A full node will only sync the given parachain and will follow the
-/// tip of the chain.
-#[deprecated = "use start_relay_chain_tasks instead"]
-pub fn start_full_node<Block, Client, Backend, RCInterface>(
-	StartFullNodeParams {
-		client,
-		announce_block,
-		task_manager,
-		relay_chain_interface,
-		para_id,
-		relay_chain_slot_duration,
-		import_queue,
-		recovery_handle,
-		sync_service,
-		prometheus_registry,
-	}: StartFullNodeParams<Block, Client, RCInterface>,
-) -> sc_service::error::Result<()>
-where
-	Block: BlockT,
-	Client: Finalizer<Block, Backend>
-		+ UsageProvider<Block>
-		+ HeaderBackend<Block>
-		+ Send
-		+ Sync
-		+ BlockBackend<Block>
-		+ BlockchainEvents<Block>
-		+ 'static,
-	for<'a> &'a Client: BlockImport<Block>,
-	Backend: BackendT<Block> + 'static,
-	RCInterface: RelayChainInterface + Clone + 'static,
-{
-	start_relay_chain_tasks(StartRelayChainTasksParams {
-		client,
-		announce_block,
-		task_manager,
-		relay_chain_interface,
-		para_id,
-		relay_chain_slot_duration,
-		import_queue,
-		recovery_handle,
-		sync_service,
-		da_recovery_profile: DARecoveryProfile::FullNode,
-		prometheus_registry,
-	})
-}
-
-/// Re-exports of old parachain consensus loop start logic.
-#[deprecated = "This is old consensus architecture only for backwards compatibility \
-	and will be removed in the future"]
-pub mod old_consensus {
-	#[allow(deprecated)]
-	pub use cumulus_client_collator::{start_collator, start_collator_sync, StartCollatorParams};
-}
-
 /// Prepare the parachain's node configuration
 ///
 /// This function will:
@@ -394,7 +234,7 @@ pub async fn build_relay_chain_interface(
 	collator_options: CollatorOptions,
 	hwbench: Option<sc_sysinfo::HwBench>,
 ) -> RelayChainResult<(
-	Arc<(dyn RelayChainInterface + 'static)>,
+	Arc<dyn RelayChainInterface + 'static>,
 	Option<CollatorPair>,
 	Arc<dyn NetworkService>,
 	async_channel::Receiver<IncomingRequest>,
@@ -407,14 +247,15 @@ pub async fn build_relay_chain_interface(
 			task_manager,
 			hwbench,
 		),
-		cumulus_client_cli::RelayChainMode::ExternalRpc(rpc_target_urls) =>
+		cumulus_client_cli::RelayChainMode::ExternalRpc(rpc_target_urls) => {
 			build_minimal_relay_chain_node_with_rpc(
 				relay_chain_config,
 				parachain_config.prometheus_registry(),
 				task_manager,
 				rpc_target_urls,
 			)
-			.await,
+			.await
+		},
 	}
 }
 
@@ -456,6 +297,7 @@ pub struct BuildNetworkParams<
 	pub para_id: ParaId,
 	pub relay_chain_interface: RCInterface,
 	pub spawn_handle: SpawnTaskHandle,
+	pub spawn_essential_handle: SpawnEssentialTaskHandle,
 	pub import_queue: IQ,
 	pub sybil_resistance_level: CollatorSybilResistance,
 	pub metrics: sc_network::NotificationMetrics,
@@ -470,6 +312,7 @@ pub async fn build_network<'a, Block, Client, RCInterface, IQ, Network>(
 		transaction_pool,
 		para_id,
 		spawn_handle,
+		spawn_essential_handle,
 		relay_chain_interface,
 		import_queue,
 		sybil_resistance_level,
@@ -539,6 +382,7 @@ where
 		client,
 		transaction_pool,
 		spawn_handle,
+		spawn_essential_handle,
 		import_queue,
 		block_announce_validator_builder: Some(Box::new(move |_| block_announce_validator)),
 		warp_sync_config,
@@ -597,7 +441,7 @@ where
 				finalized_header.number(),
 				finalized_header.hash()
 			);
-			return Ok(finalized_header)
+			return Ok(finalized_header);
 		}
 	}
 
@@ -617,7 +461,7 @@ async fn parachain_informant<Block: BlockT, Client>(
 		Ok(import_notifications) => import_notifications,
 		Err(e) => {
 			log::error!("Failed to get import notification stream: {e:?}. Parachain informant will not run!");
-			return
+			return;
 		},
 	};
 	let mut last_backed_block_time: Option<Instant> = None;
@@ -626,7 +470,7 @@ async fn parachain_informant<Block: BlockT, Client>(
 			Ok(candidate_events) => candidate_events,
 			Err(e) => {
 				log::warn!("Failed to get candidate events for block {}: {e:?}", n.hash());
-				continue
+				continue;
 			},
 		};
 		let mut backed_candidates = Vec::new();
@@ -644,7 +488,7 @@ async fn parachain_informant<Block: BlockT, Client>(
 							log::warn!(
 								"Failed to decode parachain header from backed block: {e:?}"
 							);
-							continue
+							continue;
 						},
 					};
 					let backed_block_time = Instant::now();
@@ -667,7 +511,7 @@ async fn parachain_informant<Block: BlockT, Client>(
 							log::warn!(
 								"Failed to decode parachain header from included block: {e:?}"
 							);
-							continue
+							continue;
 						},
 					};
 					let unincluded_segment_size =
@@ -688,7 +532,7 @@ async fn parachain_informant<Block: BlockT, Client>(
 							log::warn!(
 								"Failed to decode parachain header from timed out block: {e:?}"
 							);
-							continue
+							continue;
 						},
 					};
 					timed_out_candidates.push(timed_out_block);
@@ -759,5 +603,44 @@ impl ParachainInformantMetrics {
 			parachain_block_backed_duration: parachain_block_authorship_duration,
 			unincluded_segment_size,
 		})
+	}
+}
+
+/// Implementation of [`TracingExecuteBlock`] for parachains.
+///
+/// Ensures that all the required extensions required by parachain runtimes are registered and
+/// available.
+pub struct ParachainTracingExecuteBlock<Client> {
+	client: Arc<Client>,
+}
+
+impl<Client> ParachainTracingExecuteBlock<Client> {
+	/// Creates a new instance of `self`.
+	pub fn new(client: Arc<Client>) -> Self {
+		Self { client }
+	}
+}
+
+impl<Block, Client> TracingExecuteBlock<Block> for ParachainTracingExecuteBlock<Client>
+where
+	Block: BlockT,
+	Client: ProvideRuntimeApi<Block> + AuxStore + Send + Sync,
+	Client::Api: Core<Block>,
+{
+	fn execute_block(&self, orig_hash: Block::Hash, block: Block) -> sp_blockchain::Result<()> {
+		let mut runtime_api = self.client.runtime_api();
+		let storage_proof_recorder = ProofRecorder::<Block>::default();
+
+		let proof_size_ext = load_proof_size_recording(&*self.client, orig_hash)?.map_or_else(
+			|| ProofSizeExt::new(storage_proof_recorder.clone()),
+			|recordings| ProofSizeExt::new(ReplayProofSizeProvider::from(recordings)),
+		);
+		runtime_api.register_extension(proof_size_ext);
+
+		runtime_api.record_proof_with_recorder(storage_proof_recorder);
+
+		runtime_api
+			.execute_block(*block.header().parent_hash(), block.into())
+			.map_err(Into::into)
 	}
 }

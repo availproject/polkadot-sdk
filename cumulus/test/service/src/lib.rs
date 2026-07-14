@@ -48,27 +48,24 @@ use url::Url;
 
 use crate::runtime::Weight;
 use cumulus_client_cli::{CollatorOptions, RelayChainMode};
-use cumulus_client_consensus_common::{
-	ParachainBlockImport as TParachainBlockImport, ParachainCandidate, ParachainConsensus,
-};
+use cumulus_client_consensus_common::ParachainBlockImport as TParachainBlockImport;
 use cumulus_client_pov_recovery::{RecoveryDelayRange, RecoveryHandle};
-#[allow(deprecated)]
-use cumulus_client_service::old_consensus;
 use cumulus_client_service::{
 	build_network, prepare_node_config, start_relay_chain_tasks, BuildNetworkParams,
-	CollatorSybilResistance, DARecoveryProfile, StartRelayChainTasksParams,
+	CollatorSybilResistance, DARecoveryProfile, ParachainTracingExecuteBlock,
+	StartRelayChainTasksParams,
 };
 use cumulus_primitives_core::{relay_chain::ValidationCode, GetParachainInfo, ParaId};
 use cumulus_relay_chain_inprocess_interface::RelayChainInProcessInterface;
 use cumulus_relay_chain_interface::{RelayChainError, RelayChainInterface, RelayChainResult};
 use cumulus_relay_chain_minimal_node::build_minimal_relay_chain_node_with_rpc;
 
-use cumulus_test_runtime::{Hash, Header, NodeBlock as Block, RuntimeApi};
+use cumulus_test_runtime::{Hash, NodeBlock as Block, RuntimeApi};
 
 use frame_system_rpc_runtime_api::AccountNonceApi;
 use polkadot_node_subsystem::{errors::RecoveryError, messages::AvailabilityRecoveryMessage};
 use polkadot_overseer::Handle as OverseerHandle;
-use polkadot_primitives::{CandidateHash, CollatorPair, Hash as PHash, PersistedValidationData};
+use polkadot_primitives::{CandidateHash, CollatorPair};
 use polkadot_service::ProvideRuntimeApi;
 use sc_consensus::ImportQueue;
 use sc_network::{
@@ -102,22 +99,6 @@ pub use cumulus_test_runtime as runtime;
 pub use sp_keyring::Sr25519Keyring as Keyring;
 
 const LOG_TARGET: &str = "cumulus-test-service";
-
-/// A consensus that will never produce any block.
-#[derive(Clone)]
-struct NullConsensus;
-
-#[async_trait::async_trait]
-impl ParachainConsensus<Block> for NullConsensus {
-	async fn produce_candidate(
-		&mut self,
-		_: &Header,
-		_: PHash,
-		_: &PersistedValidationData,
-	) -> Option<ParachainCandidate<Block>> {
-		None
-	}
-}
 
 /// The signature of the announce block fn.
 pub type AnnounceBlockFn = Arc<dyn Fn(Hash, Option<Vec<u8>>) + Send + Sync>;
@@ -163,7 +144,7 @@ impl RecoveryHandle for FailingRecoveryHandle {
 
 		// For every 3rd block we immediately signal unavailability to trigger
 		// a retry. The same candidate is never failed multiple times to ensure progress.
-		if self.counter % 3 == 0 && self.failed_hashes.insert(candidate_hash) {
+		if self.counter.is_multiple_of(3) && self.failed_hashes.insert(candidate_hash) {
 			tracing::info!(target: LOG_TARGET, ?candidate_hash, "Failing pov recovery.");
 
 			let AvailabilityRecoveryMessage::RecoverAvailableData(_, _, _, _, back_sender) =
@@ -215,10 +196,11 @@ pub fn new_partial(
 			None,
 			executor,
 			enable_import_proof_record,
+			Default::default(),
 		)?;
 	let client = Arc::new(client);
 
-	let (block_import, slot_based_handle) =
+	let (block_import, block_import_handle) =
 		SlotBasedBlockImport::new(client.clone(), client.clone());
 	let block_import = ParachainBlockImport::new(block_import, backend.clone());
 
@@ -263,7 +245,7 @@ pub fn new_partial(
 		task_manager,
 		transaction_pool,
 		select_chain: (),
-		other: (block_import, slot_based_handle),
+		other: (block_import, block_import_handle),
 	};
 
 	Ok(params)
@@ -289,7 +271,7 @@ async fn build_relay_chain_interface(
 			Some("Relaychain"),
 		)
 		.map_err(|e| RelayChainError::Application(Box::new(e) as Box<_>))?,
-		cumulus_client_cli::RelayChainMode::ExternalRpc(rpc_target_urls) =>
+		cumulus_client_cli::RelayChainMode::ExternalRpc(rpc_target_urls) => {
 			return build_minimal_relay_chain_node_with_rpc(
 				relay_chain_config,
 				parachain_prometheus_registry,
@@ -297,7 +279,8 @@ async fn build_relay_chain_interface(
 				rpc_target_urls,
 			)
 			.await
-			.map(|r| r.0),
+			.map(|r| r.0)
+		},
 	};
 
 	task_manager.add_child(relay_chain_node.task_manager);
@@ -323,7 +306,6 @@ pub async fn start_node_impl<RB, Net: NetworkBackend<Block, Hash>>(
 	wrap_announce_block: Option<Box<dyn FnOnce(AnnounceBlockFn) -> AnnounceBlockFn>>,
 	fail_pov_recovery: bool,
 	rpc_ext_builder: RB,
-	consensus: Consensus,
 	collator_options: CollatorOptions,
 	proof_recording_during_import: bool,
 	use_slot_based_collator: bool,
@@ -348,8 +330,7 @@ where
 	let client = params.client.clone();
 	let backend = params.backend.clone();
 
-	let block_import = params.other.0;
-	let slot_based_handle = params.other.1;
+	let (block_import, block_import_handle) = params.other;
 	let relay_chain_interface = build_relay_chain_interface(
 		relay_chain_config,
 		parachain_config.prometheus_registry(),
@@ -382,15 +363,13 @@ where
 			transaction_pool: transaction_pool.clone(),
 			para_id,
 			spawn_handle: task_manager.spawn_handle(),
+			spawn_essential_handle: task_manager.spawn_essential_handle(),
 			relay_chain_interface: relay_chain_interface.clone(),
 			import_queue: params.import_queue,
 			metrics: Net::register_notification_metrics(
 				parachain_config.prometheus_config.as_ref().map(|config| &config.registry),
 			),
-			sybil_resistance_level: CollatorSybilResistance::Resistant, /* Either Aura that is
-			                                                             * resistant or null that
-			                                                             * is not producing any
-			                                                             * blocks at all. */
+			sybil_resistance_level: CollatorSybilResistance::Resistant,
 		})
 		.await?;
 
@@ -413,6 +392,7 @@ where
 		system_rpc_tx,
 		tx_handler_controller,
 		telemetry: None,
+		tracing_execute_block: Some(Arc::new(ParachainTracingExecuteBlock::new(client.clone()))),
 	})?;
 
 	let announce_block = {
@@ -453,97 +433,78 @@ where
 		prometheus_registry: None,
 	})?;
 
+	let collator_peer_id = network.local_peer_id();
 	if let Some(collator_key) = collator_key {
-		if let Consensus::Null = consensus {
-			#[allow(deprecated)]
-			old_consensus::start_collator(old_consensus::StartCollatorParams {
-				block_status: client.clone(),
-				announce_block,
-				runtime_api: client.clone(),
-				spawner: task_manager.spawn_handle(),
+		let proposer = sc_basic_authorship::ProposerFactory::new(
+			task_manager.spawn_handle(),
+			client.clone(),
+			transaction_pool.clone(),
+			prometheus_registry.as_ref(),
+			None,
+		);
+
+		let collator_service = CollatorService::new(
+			client.clone(),
+			Arc::new(task_manager.spawn_handle()),
+			announce_block,
+			client.clone(),
+		);
+
+		let client_for_aura = client.clone();
+
+		if use_slot_based_collator {
+			tracing::info!(target: LOG_TARGET, "Starting block authoring with slot based authoring.");
+			let params = SlotBasedParams {
+				create_inherent_data_providers: move |_, ()| async move { Ok(()) },
+				block_import,
+				para_client: client.clone(),
+				para_backend: backend.clone(),
+				relay_client: relay_chain_interface,
+				code_hash_provider: move |block_hash| {
+					client_for_aura.code_at(block_hash).ok().map(|c| ValidationCode::from(c).hash())
+				},
+				keystore,
+				collator_key,
+				relay_chain_slot_duration,
 				para_id,
-				parachain_consensus: Box::new(NullConsensus) as Box<_>,
-				key: collator_key,
-				overseer_handle,
-			})
-			.await;
+				proposer,
+				collator_service,
+				reinitialize: false,
+				slot_offset: Duration::from_secs(1),
+				block_import_handle,
+				spawner: task_manager.spawn_essential_handle(),
+				export_pov: None,
+				max_pov_percentage: None,
+				collator_peer_id,
+			};
+
+			slot_based::run::<Block, AuthorityPair, _, _, _, _, _, _, _, _, _>(params);
 		} else {
-			let proposer = sc_basic_authorship::ProposerFactory::with_proof_recording(
-				task_manager.spawn_handle(),
-				client.clone(),
-				transaction_pool.clone(),
-				prometheus_registry.as_ref(),
-				None,
-			);
+			tracing::info!(target: LOG_TARGET, "Starting block authoring with lookahead collator.");
+			let params = AuraParams {
+				create_inherent_data_providers: move |_, ()| async move { Ok(()) },
+				block_import,
+				para_client: client.clone(),
+				para_backend: backend.clone(),
+				relay_client: relay_chain_interface,
+				code_hash_provider: move |block_hash| {
+					client_for_aura.code_at(block_hash).ok().map(|c| ValidationCode::from(c).hash())
+				},
+				keystore,
+				collator_key,
+				collator_peer_id,
+				para_id,
+				overseer_handle,
+				relay_chain_slot_duration,
+				proposer,
+				collator_service,
+				authoring_duration: Duration::from_millis(2000),
+				reinitialize: false,
+				max_pov_percentage: None,
+			};
 
-			let collator_service = CollatorService::new(
-				client.clone(),
-				Arc::new(task_manager.spawn_handle()),
-				announce_block,
-				client.clone(),
-			);
-
-			let client_for_aura = client.clone();
-
-			if use_slot_based_collator {
-				tracing::info!(target: LOG_TARGET, "Starting block authoring with slot based authoring.");
-				let params = SlotBasedParams {
-					create_inherent_data_providers: move |_, ()| async move { Ok(()) },
-					block_import,
-					para_client: client.clone(),
-					para_backend: backend.clone(),
-					relay_client: relay_chain_interface,
-					code_hash_provider: move |block_hash| {
-						client_for_aura
-							.code_at(block_hash)
-							.ok()
-							.map(|c| ValidationCode::from(c).hash())
-					},
-					keystore,
-					collator_key,
-					relay_chain_slot_duration,
-					para_id,
-					proposer,
-					collator_service,
-					authoring_duration: Duration::from_millis(2000),
-					reinitialize: false,
-					slot_offset: Duration::from_secs(1),
-					block_import_handle: slot_based_handle,
-					spawner: task_manager.spawn_handle(),
-					export_pov: None,
-					max_pov_percentage: None,
-				};
-
-				slot_based::run::<Block, AuthorityPair, _, _, _, _, _, _, _, _, _>(params);
-			} else {
-				tracing::info!(target: LOG_TARGET, "Starting block authoring with lookahead collator.");
-				let params = AuraParams {
-					create_inherent_data_providers: move |_, ()| async move { Ok(()) },
-					block_import,
-					para_client: client.clone(),
-					para_backend: backend.clone(),
-					relay_client: relay_chain_interface,
-					code_hash_provider: move |block_hash| {
-						client_for_aura
-							.code_at(block_hash)
-							.ok()
-							.map(|c| ValidationCode::from(c).hash())
-					},
-					keystore,
-					collator_key,
-					para_id,
-					overseer_handle,
-					relay_chain_slot_duration,
-					proposer,
-					collator_service,
-					authoring_duration: Duration::from_millis(2000),
-					reinitialize: false,
-					max_pov_percentage: None,
-				};
-
-				let fut = aura::run::<Block, AuthorityPair, _, _, _, _, _, _, _, _>(params);
-				task_manager.spawn_essential_handle().spawn("aura", None, fut);
-			}
+			let fut = aura::run::<Block, AuthorityPair, _, _, _, _, _, _, _, _>(params);
+			task_manager.spawn_essential_handle().spawn("aura", None, fut);
 		}
 	}
 
@@ -569,14 +530,6 @@ pub struct TestNode {
 	pub backend: Arc<Backend>,
 }
 
-#[allow(missing_docs)]
-pub enum Consensus {
-	/// Use Aura consensus.
-	Aura,
-	/// Use the null consensus that will never produce any block.
-	Null,
-}
-
 /// A builder to create a [`TestNode`].
 pub struct TestNodeBuilder {
 	para_id: ParaId,
@@ -589,7 +542,6 @@ pub struct TestNodeBuilder {
 	wrap_announce_block: Option<Box<dyn FnOnce(AnnounceBlockFn) -> AnnounceBlockFn>>,
 	storage_update_func_parachain: Option<Box<dyn Fn()>>,
 	storage_update_func_relay_chain: Option<Box<dyn Fn()>>,
-	consensus: Consensus,
 	relay_chain_mode: RelayChainMode,
 	endowed_accounts: Vec<AccountId>,
 	record_proof_during_import: bool,
@@ -614,7 +566,6 @@ impl TestNodeBuilder {
 			wrap_announce_block: None,
 			storage_update_func_parachain: None,
 			storage_update_func_relay_chain: None,
-			consensus: Consensus::Aura,
 			endowed_accounts: Default::default(),
 			relay_chain_mode: RelayChainMode::Embedded,
 			record_proof_during_import: true,
@@ -703,12 +654,6 @@ impl TestNodeBuilder {
 		self
 	}
 
-	/// Use the null consensus that will never author any block.
-	pub fn use_null_consensus(mut self) -> Self {
-		self.consensus = Consensus::Null;
-		self
-	}
-
 	/// Connect to full node via RPC.
 	pub fn use_external_relay_chain_node_at_url(mut self, network_address: Url) -> Self {
 		self.relay_chain_mode = RelayChainMode::ExternalRpc(vec![network_address]);
@@ -769,7 +714,7 @@ impl TestNodeBuilder {
 
 		let (task_manager, client, network, rpc_handlers, transaction_pool, backend) =
 			match relay_chain_config.network.network_backend {
-				sc_network::config::NetworkBackendType::Libp2p =>
+				sc_network::config::NetworkBackendType::Libp2p => {
 					start_node_impl::<_, sc_network::NetworkWorker<_, _>>(
 						parachain_config,
 						self.collator_key,
@@ -777,14 +722,14 @@ impl TestNodeBuilder {
 						self.wrap_announce_block,
 						false,
 						|_| Ok(jsonrpsee::RpcModule::new(())),
-						self.consensus,
 						collator_options,
 						self.record_proof_during_import,
 						false,
 					)
 					.await
-					.expect("could not create Cumulus test service"),
-				sc_network::config::NetworkBackendType::Litep2p =>
+					.expect("could not create Cumulus test service")
+				},
+				sc_network::config::NetworkBackendType::Litep2p => {
 					start_node_impl::<_, sc_network::Litep2pNetworkBackend>(
 						parachain_config,
 						self.collator_key,
@@ -792,13 +737,13 @@ impl TestNodeBuilder {
 						self.wrap_announce_block,
 						false,
 						|_| Ok(jsonrpsee::RpcModule::new(())),
-						self.consensus,
 						collator_options,
 						self.record_proof_during_import,
 						false,
 					)
 					.await
-					.expect("could not create Cumulus test service"),
+					.expect("could not create Cumulus test service")
+				},
 			};
 		let peer_id = network.local_peer_id();
 		let multiaddr = polkadot_test_service::get_listen_address(network.clone()).await;
@@ -900,6 +845,7 @@ pub fn node_config(
 			rate_limit: None,
 			rate_limit_whitelisted_ips: Default::default(),
 			rate_limit_trust_proxy_headers: Default::default(),
+			request_logger_limit: 1024,
 		},
 		prometheus_config: None,
 		telemetry_endpoints: None,
@@ -977,7 +923,7 @@ pub fn construct_extrinsic(
 		.map(|c| c / 2)
 		.unwrap_or(2) as u64;
 	let tip = 0;
-	let tx_ext: runtime::TxExtension = (
+	let tx_ext: runtime::TxExtension = cumulus_pallet_weight_reclaim::StorageWeightReclaim::from((
 		frame_system::AuthorizeCall::<runtime::Runtime>::new(),
 		frame_system::CheckNonZeroSender::<runtime::Runtime>::new(),
 		frame_system::CheckSpecVersion::<runtime::Runtime>::new(),
@@ -989,12 +935,13 @@ pub fn construct_extrinsic(
 		frame_system::CheckNonce::<runtime::Runtime>::from(nonce),
 		frame_system::CheckWeight::<runtime::Runtime>::new(),
 		pallet_transaction_payment::ChargeTransactionPayment::<runtime::Runtime>::from(tip),
-	)
-		.into();
+		runtime::TestTransactionExtension::<runtime::Runtime>::default(),
+	))
+	.into();
 	let raw_payload = runtime::SignedPayload::from_raw(
 		function.clone(),
 		tx_ext.clone(),
-		((), (), runtime::VERSION.spec_version, genesis_block, current_block_hash, (), (), ()),
+		((), (), runtime::VERSION.spec_version, genesis_block, current_block_hash, (), (), (), ()),
 	);
 	let signature = raw_payload.using_encoded(|e| caller.sign(e));
 	runtime::UncheckedExtrinsic::new_signed(

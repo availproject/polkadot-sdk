@@ -14,302 +14,264 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-use super::{
-	utility::{IntoAddress, IntoU256},
-	Context,
-};
-use crate::vm::Ext;
-use core::cmp::min;
-use revm::{
-	interpreter::{
-		gas::{self, warm_cold_cost, CALL_STIPEND},
-		host::Host,
-		interpreter_types::{InputsTr, RuntimeFlag, StackTr},
-		InstructionResult,
+use crate::{
+	DispatchError, Error, Key, LOG_TARGET, RuntimeCosts, U256, limits,
+	metering::Token,
+	storage::WriteOutcome,
+	vec::Vec,
+	vm::{
+		Ext,
+		evm::{
+			Interpreter, instructions::utility::IntoAddress, interpreter::Halt,
+			util::as_usize_or_halt,
+		},
 	},
-	primitives::{hardfork::SpecId::*, Bytes, Log, LogData, B256, BLOCK_HASH_HISTORY, U256},
 };
+use core::ops::ControlFlow;
 
 /// Implements the BALANCE instruction.
 ///
 /// Gets the balance of the given account.
-pub fn balance<'ext, E: Ext>(context: Context<'_, 'ext, E>) {
-	popn_top!([], top, context.interpreter);
-	let address = top.into_address();
-	let Some(balance) = context.host.balance(address) else {
-		context.interpreter.halt(InstructionResult::FatalExternalError);
-		return;
-	};
-	let spec_id = context.interpreter.runtime_flag.spec_id();
-	gas_legacy!(
-		context.interpreter,
-		if spec_id.is_enabled_in(BERLIN) {
-			warm_cold_cost(balance.is_cold)
-		} else if spec_id.is_enabled_in(ISTANBUL) {
-			// EIP-1884: Repricing for trie-size-dependent opcodes
-			700
-		} else if spec_id.is_enabled_in(TANGERINE) {
-			400
-		} else {
-			20
-		}
-	);
-	*top = balance.data;
+pub fn balance<E: Ext>(interpreter: &mut Interpreter<E>) -> ControlFlow<Halt> {
+	interpreter.ext.charge_or_halt(RuntimeCosts::BalanceOf)?;
+	let ([], top) = interpreter.stack.popn_top()?;
+	*top = interpreter.ext.balance_of(&top.into_address());
+	ControlFlow::Continue(())
 }
 
 /// EIP-1884: Repricing for trie-size-dependent opcodes
-pub fn selfbalance<'ext, E: Ext>(context: Context<'_, 'ext, E>) {
-	check!(context.interpreter, ISTANBUL);
-	gas_legacy!(context.interpreter, gas::LOW);
-
-	let Some(balance) = context.host.balance(context.interpreter.input.target_address()) else {
-		context.interpreter.halt(InstructionResult::FatalExternalError);
-		return;
-	};
-	push!(context.interpreter, balance.data);
+pub fn selfbalance<E: Ext>(interpreter: &mut Interpreter<E>) -> ControlFlow<Halt> {
+	interpreter.ext.charge_or_halt(RuntimeCosts::Balance)?;
+	let balance = interpreter.ext.balance();
+	interpreter.stack.push(balance)
 }
 
 /// Implements the EXTCODESIZE instruction.
 ///
 /// Gets the size of an account's code.
-pub fn extcodesize<'ext, E: Ext>(context: Context<'_, 'ext, E>) {
-	popn_top!([], top, context.interpreter);
-	let address = top.into_address();
-	let Some(code) = context.host.load_account_code(address) else {
-		context.interpreter.halt(InstructionResult::FatalExternalError);
-		return;
-	};
-	let spec_id = context.interpreter.runtime_flag.spec_id();
-	if spec_id.is_enabled_in(BERLIN) {
-		gas_legacy!(context.interpreter, warm_cold_cost(code.is_cold));
-	} else if spec_id.is_enabled_in(TANGERINE) {
-		gas_legacy!(context.interpreter, 700);
-	} else {
-		gas_legacy!(context.interpreter, 20);
-	}
-
-	*top = U256::from(code.len());
+pub fn extcodesize<E: Ext>(interpreter: &mut Interpreter<E>) -> ControlFlow<Halt> {
+	let ([], top) = interpreter.stack.popn_top()?;
+	interpreter.ext.charge_or_halt(RuntimeCosts::CodeSize)?;
+	let code_size = interpreter.ext.code_size(&top.into_address());
+	*top = U256::from(code_size);
+	ControlFlow::Continue(())
 }
 
 /// EIP-1052: EXTCODEHASH opcode
-pub fn extcodehash<'ext, E: Ext>(context: Context<'_, 'ext, E>) {
-	check!(context.interpreter, CONSTANTINOPLE);
-	popn_top!([], top, context.interpreter);
-	let address = top.into_address();
-	let Some(code_hash) = context.host.load_account_code_hash(address) else {
-		context.interpreter.halt(InstructionResult::FatalExternalError);
-		return;
-	};
-	let spec_id = context.interpreter.runtime_flag.spec_id();
-	if spec_id.is_enabled_in(BERLIN) {
-		gas_legacy!(context.interpreter, warm_cold_cost(code_hash.is_cold));
-	} else if spec_id.is_enabled_in(ISTANBUL) {
-		gas_legacy!(context.interpreter, 700);
-	} else {
-		gas_legacy!(context.interpreter, 400);
-	}
-	*top = code_hash.into_u256();
+pub fn extcodehash<E: Ext>(interpreter: &mut Interpreter<E>) -> ControlFlow<Halt> {
+	let ([], top) = interpreter.stack.popn_top()?;
+	interpreter.ext.charge_or_halt(RuntimeCosts::CodeHash)?;
+	let code_hash = interpreter.ext.code_hash(&top.into_address());
+	*top = U256::from_big_endian(&code_hash.0);
+	ControlFlow::Continue(())
 }
 
 /// Implements the EXTCODECOPY instruction.
 ///
 /// Copies a portion of an account's code to memory.
-pub fn extcodecopy<'ext, E: Ext>(context: Context<'_, 'ext, E>) {
-	popn!([address, memory_offset, code_offset, len_u256], context.interpreter);
-	let address = address.into_address();
-	let Some(code) = context.host.load_account_code(address) else {
-		context.interpreter.halt(InstructionResult::FatalExternalError);
-		return;
-	};
-
-	let len = as_usize_or_fail!(context.interpreter, len_u256);
-	gas_or_fail!(
-		context.interpreter,
-		gas::extcodecopy_cost(context.interpreter.runtime_flag.spec_id(), len, code.is_cold)
-	);
+pub fn extcodecopy<E: Ext>(interpreter: &mut Interpreter<E>) -> ControlFlow<Halt> {
+	let [address, memory_offset, code_offset, len] = interpreter.stack.popn()?;
+	let len = as_usize_or_halt::<E::T>(len)?;
+	interpreter.ext.charge_or_halt(RuntimeCosts::ExtCodeCopy(len as u32))?;
 	if len == 0 {
-		return;
+		return ControlFlow::Continue(());
 	}
-	let memory_offset = as_usize_or_fail!(context.interpreter, memory_offset);
-	let code_offset = min(as_usize_saturated!(code_offset), code.len());
-	resize_memory!(context.interpreter, memory_offset, len);
 
+	let address = address.into_address();
+	let memory_offset = as_usize_or_halt::<E::T>(memory_offset)?;
+	let code_offset = as_usize_or_halt::<E::T>(code_offset)?;
+
+	interpreter.memory.resize(memory_offset, len)?;
+
+	let mut buf = interpreter.memory.slice_mut(memory_offset, len);
 	// Note: This can't panic because we resized memory to fit.
-	context.interpreter.memory.set_data(memory_offset, code_offset, len, &code);
+	interpreter.ext.copy_code_slice(&mut buf, &address, code_offset);
+	ControlFlow::Continue(())
 }
 
 /// Implements the BLOCKHASH instruction.
 ///
 /// Gets the hash of one of the 256 most recent complete blocks.
-pub fn blockhash<'ext, E: Ext>(context: Context<'_, 'ext, E>) {
-	gas_legacy!(context.interpreter, gas::BLOCKHASH);
-	popn_top!([], number, context.interpreter);
+pub fn blockhash<E: Ext>(interpreter: &mut Interpreter<E>) -> ControlFlow<Halt> {
+	interpreter.ext.charge_or_halt(RuntimeCosts::BlockHash)?;
+	let ([], number) = interpreter.stack.popn_top()?;
 
-	let requested_number = *number;
-	let block_number = context.host.block_number();
-
-	let Some(diff) = block_number.checked_sub(requested_number) else {
-		*number = U256::ZERO;
-		return;
-	};
-
-	let diff = as_u64_saturated!(diff);
-
-	// blockhash should push zero if number is same as current block number.
-	if diff == 0 {
-		*number = U256::ZERO;
-		return;
-	}
-
-	*number = if diff <= BLOCK_HASH_HISTORY {
-		let Some(hash) = context.host.block_hash(as_u64_saturated!(requested_number)) else {
-			context.interpreter.halt(InstructionResult::FatalExternalError);
-			return;
-		};
-		U256::from_be_bytes(hash.0)
+	// blockhash should push zero if number is not within valid range.
+	if let Some(hash) = interpreter.ext.block_hash(*number) {
+		*number = U256::from_big_endian(&hash.0)
 	} else {
-		U256::ZERO
-	}
+		*number = U256::zero()
+	};
+	ControlFlow::Continue(())
 }
 
 /// Implements the SLOAD instruction.
 ///
 /// Loads a word from storage.
-pub fn sload<'ext, E: Ext>(context: Context<'_, 'ext, E>) {
-	popn_top!([], index, context.interpreter);
+pub fn sload<E: Ext>(interpreter: &mut Interpreter<E>) -> ControlFlow<Halt> {
+	let ([], index) = interpreter.stack.popn_top()?;
+	// NB: SLOAD loads 32 bytes from storage (i.e. U256).
+	interpreter.ext.charge_or_halt(RuntimeCosts::GetStorage(32))?;
+	let key = Key::Fix(index.to_big_endian());
+	let value = interpreter.ext.get_storage(&key);
 
-	let Some(value) = context.host.sload(context.interpreter.input.target_address(), *index) else {
-		context.interpreter.halt(InstructionResult::FatalExternalError);
-		return;
+	*index = if let Some(storage_value) = value {
+		// sload always reads a word
+		let Ok::<[u8; 32], _>(bytes) = storage_value.try_into() else {
+			log::debug!(target: crate::LOG_TARGET, "sload read invalid storage value length. Expected 32.");
+			return ControlFlow::Break(Error::<E::T>::ContractTrapped.into());
+		};
+		U256::from_big_endian(&bytes)
+	} else {
+		// the key was never written before
+		U256::zero()
+	};
+	ControlFlow::Continue(())
+}
+
+fn store_helper<'ext, E: Ext>(
+	interpreter: &mut Interpreter<'ext, E>,
+	cost_before: RuntimeCosts,
+	set_function: fn(&mut E, &Key, Option<Vec<u8>>, bool) -> Result<WriteOutcome, DispatchError>,
+	adjust_cost: fn(new_bytes: u32, old_bytes: u32) -> RuntimeCosts,
+) -> ControlFlow<Halt> {
+	if interpreter.ext.is_read_only() {
+		return ControlFlow::Break(Error::<E::T>::StateChangeDenied.into());
+	}
+
+	let [index, value] = interpreter.stack.popn()?;
+
+	// Charge gas before set_storage and later adjust it down to the true gas cost
+	let charged_amount = interpreter.ext.charge_or_halt(cost_before)?;
+	let key = Key::Fix(index.to_big_endian());
+	let take_old = false;
+	let value_to_store = if value.is_zero() { None } else { Some(value.to_big_endian().to_vec()) };
+	let Ok(write_outcome) = set_function(interpreter.ext, &key, value_to_store.clone(), take_old)
+	else {
+		return ControlFlow::Break(Error::<E::T>::ContractTrapped.into());
 	};
 
-	gas_legacy!(
-		context.interpreter,
-		gas::sload_cost(context.interpreter.runtime_flag.spec_id(), value.is_cold)
+	interpreter.ext.frame_meter_mut().adjust_weight(
+		charged_amount,
+		adjust_cost(value_to_store.unwrap_or_default().len() as u32, write_outcome.old_len()),
 	);
-	*index = value.data;
+
+	ControlFlow::Continue(())
 }
 
 /// Implements the SSTORE instruction.
 ///
 /// Stores a word to storage.
-pub fn sstore<'ext, E: Ext>(context: Context<'_, 'ext, E>) {
-	require_non_staticcall!(context.interpreter);
-
-	popn!([index, value], context.interpreter);
-
-	let Some(state_load) =
-		context.host.sstore(context.interpreter.input.target_address(), index, value)
-	else {
-		context.interpreter.halt(InstructionResult::FatalExternalError);
-		return;
-	};
-
-	// EIP-1706 Disable SSTORE with gasleft lower than call stipend
-	if context.interpreter.runtime_flag.spec_id().is_enabled_in(ISTANBUL) &&
-		context.interpreter.gas.remaining() <= CALL_STIPEND
-	{
-		context.interpreter.halt(InstructionResult::ReentrancySentryOOG);
-		return;
-	}
-	gas_legacy!(
-		context.interpreter,
-		gas::sstore_cost(
-			context.interpreter.runtime_flag.spec_id(),
-			&state_load.data,
-			state_load.is_cold
-		)
-	);
-
-	context.interpreter.gas.record_refund(gas::sstore_refund(
-		context.interpreter.runtime_flag.spec_id(),
-		&state_load.data,
-	));
+pub fn sstore<E: Ext>(interpreter: &mut Interpreter<E>) -> ControlFlow<Halt> {
+	let old_bytes = limits::STORAGE_BYTES;
+	store_helper(
+		interpreter,
+		RuntimeCosts::SetStorage { new_bytes: 32, old_bytes },
+		|ext, key, value, take_old| ext.set_storage(key, value, take_old),
+		|new_bytes, old_bytes| RuntimeCosts::SetStorage { new_bytes, old_bytes },
+	)
 }
 
 /// EIP-1153: Transient storage opcodes
 /// Store value to transient storage
-pub fn tstore<'ext, E: Ext>(context: Context<'_, 'ext, E>) {
-	check!(context.interpreter, CANCUN);
-	require_non_staticcall!(context.interpreter);
-	gas_legacy!(context.interpreter, gas::WARM_STORAGE_READ_COST);
-
-	popn!([index, value], context.interpreter);
-
-	context.host.tstore(context.interpreter.input.target_address(), index, value);
+pub fn tstore<E: Ext>(interpreter: &mut Interpreter<E>) -> ControlFlow<Halt> {
+	let old_bytes = limits::STORAGE_BYTES;
+	store_helper(
+		interpreter,
+		RuntimeCosts::SetTransientStorage { new_bytes: 32, old_bytes },
+		|ext, key, value, take_old| ext.set_transient_storage(key, value, take_old),
+		|new_bytes, old_bytes| RuntimeCosts::SetTransientStorage { new_bytes, old_bytes },
+	)
 }
 
 /// EIP-1153: Transient storage opcodes
 /// Load value from transient storage
-pub fn tload<'ext, E: Ext>(context: Context<'_, 'ext, E>) {
-	check!(context.interpreter, CANCUN);
-	gas_legacy!(context.interpreter, gas::WARM_STORAGE_READ_COST);
+pub fn tload<E: Ext>(interpreter: &mut Interpreter<E>) -> ControlFlow<Halt> {
+	let ([], index) = interpreter.stack.popn_top()?;
+	interpreter.ext.charge_or_halt(RuntimeCosts::GetTransientStorage(32))?;
 
-	popn_top!([], index, context.interpreter);
+	let key = Key::Fix(index.to_big_endian());
+	let bytes = interpreter.ext.get_transient_storage(&key);
 
-	*index = context.host.tload(context.interpreter.input.target_address(), *index);
+	*index = if let Some(storage_value) = bytes {
+		if storage_value.len() != 32 {
+			// tload always reads a word
+			log::debug!(target: crate::LOG_TARGET, "tload read invalid storage value length. Expected 32.");
+			return ControlFlow::Break(Error::<E::T>::ContractTrapped.into());
+		}
+
+		let Ok::<[u8; 32], _>(bytes) = storage_value.try_into() else {
+			return ControlFlow::Break(Error::<E::T>::ContractTrapped.into());
+		};
+		U256::from_big_endian(&bytes)
+	} else {
+		// the key was never written before
+		U256::zero()
+	};
+	ControlFlow::Continue(())
 }
 
 /// Implements the LOG0-LOG4 instructions.
 ///
 /// Appends log record with N topics.
-pub fn log<'ext, const N: usize, E: Ext>(context: Context<'_, 'ext, E>) {
-	require_non_staticcall!(context.interpreter);
-
-	popn!([offset, len], context.interpreter);
-	let len = as_usize_or_fail!(context.interpreter, len);
-	gas_or_fail!(context.interpreter, gas::log_cost(N as u8, len as u64));
-	let data = if len == 0 {
-		Bytes::new()
-	} else {
-		let offset = as_usize_or_fail!(context.interpreter, offset);
-		resize_memory!(context.interpreter, offset, len);
-		Bytes::copy_from_slice(context.interpreter.memory.slice_len(offset, len).as_ref())
-	};
-	if context.interpreter.stack.len() < N {
-		context.interpreter.halt(InstructionResult::StackUnderflow);
-		return;
+pub fn log<'ext, const N: usize, E: Ext>(
+	interpreter: &mut Interpreter<'ext, E>,
+) -> ControlFlow<Halt> {
+	if interpreter.ext.is_read_only() {
+		return ControlFlow::Break(Error::<E::T>::StateChangeDenied.into());
 	}
-	let Some(topics) = <_ as StackTr>::popn::<N>(&mut context.interpreter.stack) else {
-		context.interpreter.halt(InstructionResult::StackUnderflow);
-		return;
-	};
 
-	let log = Log {
-		address: context.interpreter.input.target_address(),
-		data: LogData::new(topics.into_iter().map(B256::from).collect(), data)
-			.expect("LogData should have <=4 topics"),
-	};
+	let [offset, len] = interpreter.stack.popn()?;
+	let len = as_usize_or_halt::<E::T>(len)?;
+	if len as u32 > limits::EVENT_BYTES {
+		return ControlFlow::Break(Error::<E::T>::OutOfGas.into());
+	}
 
-	context.host.log(log);
+	let cost = RuntimeCosts::DepositEvent { num_topic: N as u32, len: len as u32 };
+	interpreter.ext.charge_or_halt(cost)?;
+
+	let data = if len == 0 {
+		Vec::new()
+	} else {
+		let offset = as_usize_or_halt::<E::T>(offset)?;
+		interpreter.memory.resize(offset, len)?;
+		interpreter.memory.slice(offset..offset + len).to_vec()
+	};
+	if interpreter.stack.len() < N {
+		return ControlFlow::Break(Error::<E::T>::StackUnderflow.into());
+	}
+	let topics = interpreter.stack.popn::<N>()?;
+	let topics = topics.into_iter().map(|v| sp_core::H256::from(v.to_big_endian())).collect();
+
+	interpreter.ext.deposit_event(topics, data.to_vec());
+	ControlFlow::Continue(())
 }
 
 /// Implements the SELFDESTRUCT instruction.
 ///
 /// Halt execution and register account for later deletion.
-pub fn selfdestruct<'ext, E: Ext>(context: Context<'_, 'ext, E>) {
-	require_non_staticcall!(context.interpreter);
-	popn!([target], context.interpreter);
-	let target = target.into_address();
-
-	let Some(res) = context.host.selfdestruct(context.interpreter.input.target_address(), target)
-	else {
-		context.interpreter.halt(InstructionResult::FatalExternalError);
-		return;
-	};
-
-	// EIP-3529: Reduction in refunds
-	if !context.interpreter.runtime_flag.spec_id().is_enabled_in(LONDON) &&
-		!res.previously_destroyed
-	{
-		context.interpreter.gas.record_refund(gas::SELFDESTRUCT)
+pub fn selfdestruct<'ext, E: Ext>(interpreter: &mut Interpreter<'ext, E>) -> ControlFlow<Halt> {
+	if interpreter.ext.is_read_only() {
+		return ControlFlow::Break(Error::<E::T>::StateChangeDenied.into());
 	}
+	let [beneficiary] = interpreter.stack.popn()?;
+	let charged = interpreter.ext.charge_or_halt(RuntimeCosts::Terminate { code_removed: true })?;
+	let dispatch_result = interpreter.ext.terminate_if_same_tx(&beneficiary.into_address());
 
-	gas_legacy!(
-		context.interpreter,
-		gas::selfdestruct_cost(context.interpreter.runtime_flag.spec_id(), res)
-	);
-
-	context.interpreter.halt(InstructionResult::SelfDestruct);
+	match dispatch_result {
+		Ok(code_removed) => {
+			// halt execution on successful selfdestruct
+			if matches!(code_removed, crate::CodeRemoved::No) {
+				let actual_cost = RuntimeCosts::Terminate { code_removed: false };
+				interpreter
+					.ext
+					.adjust_gas(charged, <RuntimeCosts as Token<E::T>>::weight(&actual_cost));
+			}
+			ControlFlow::Break(Halt::Return(Vec::default()))
+		},
+		Err(e) => {
+			log::debug!(target: LOG_TARGET, "Selfdestruct failed: {:?}", e);
+			ControlFlow::Break(Halt::Err(e))
+		},
+	}
 }

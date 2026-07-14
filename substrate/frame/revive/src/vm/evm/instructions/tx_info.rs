@@ -15,41 +15,41 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use revm::{
-	interpreter::{
-		gas as revm_gas,
-		host::Host,
-		interpreter_types::{RuntimeFlag, StackTr},
+use crate::{
+	Config, Error,
+	address::AddressMapper,
+	vm::{
+		Ext, RuntimeCosts,
+		evm::{Interpreter, interpreter::Halt},
 	},
-	primitives::U256,
 };
-
-use super::Context;
-use crate::vm::Ext;
+use core::ops::ControlFlow;
 
 /// Implements the GASPRICE instruction.
 ///
 /// Gets the gas price of the originating transaction.
-pub fn gasprice<'ext, E: Ext>(context: Context<'_, 'ext, E>) {
-	gas_legacy!(context.interpreter, revm_gas::BASE);
-	push!(context.interpreter, U256::from(context.host.effective_gas_price()));
+pub fn gasprice<E: Ext>(interpreter: &mut Interpreter<E>) -> ControlFlow<Halt> {
+	interpreter.ext.charge_or_halt(RuntimeCosts::GasPrice)?;
+	interpreter.stack.push(interpreter.ext.effective_gas_price())
 }
 
 /// Implements the ORIGIN instruction.
 ///
 /// Gets the execution origination address.
-pub fn origin<'ext, E: Ext>(context: Context<'_, 'ext, E>) {
-	gas_legacy!(context.interpreter, revm_gas::BASE);
-	push!(context.interpreter, context.host.caller().into_word().into());
+pub fn origin<E: Ext>(interpreter: &mut Interpreter<E>) -> ControlFlow<Halt> {
+	interpreter.ext.charge_or_halt(RuntimeCosts::Origin)?;
+	match interpreter.ext.origin().account_id() {
+		Ok(account_id) => {
+			let address = <E::T as Config>::AddressMapper::to_address(account_id);
+			interpreter.stack.push(address)
+		},
+		Err(_) => ControlFlow::Break(Error::<E::T>::ContractTrapped.into()),
+	}
 }
 
 /// Implements the BLOBHASH instruction.
 ///
 /// EIP-4844: Shard Blob Transactions - gets the hash of a transaction blob.
-pub fn blob_hash<'ext, E: Ext>(context: Context<'_, 'ext, E>) {
-	check!(context.interpreter, CANCUN);
-	gas_legacy!(context.interpreter, revm_gas::VERYLOW);
-	popn_top!([], index, context.interpreter);
-	let i = as_usize_saturated!(index);
-	*index = context.host.blob_hash(i).unwrap_or_default();
+pub fn blob_hash<'ext, E: Ext>(_interpreter: &mut Interpreter<'ext, E>) -> ControlFlow<Halt> {
+	ControlFlow::Break(Error::<E::T>::InvalidInstruction.into())
 }

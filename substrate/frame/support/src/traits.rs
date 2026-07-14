@@ -28,8 +28,9 @@ pub use tokens::{
 	},
 	fungible, fungibles,
 	imbalance::{Imbalance, OnUnbalanced, SignedImbalance},
-	nonfungible, nonfungible_v2, nonfungibles, nonfungibles_v2, BalanceStatus,
-	ExistenceRequirement, Locker, WithdrawReasons,
+	nonfungible, nonfungible_v2, nonfungibles, nonfungibles_v2,
+	stable::PsmInterface,
+	BalanceStatus, ExistenceRequirement, Locker, WithdrawReasons,
 };
 
 mod members;
@@ -98,13 +99,11 @@ mod storage;
 pub use storage::MaybeConsideration;
 pub use storage::{
 	Consideration, ConstantStoragePrice, Disabled, Footprint, Incrementable, Instance,
-	LinearStoragePrice, PartialStorageInfoTrait, StorageInfo, StorageInfoTrait, StorageInstance,
-	TrackedStorageKey, WhitelistedStorageKeys,
+	LinearStoragePrice, NoDrop, PartialStorageInfoTrait, StorageInfo, StorageInfoTrait,
+	StorageInstance, SuppressedDrop, TrackedStorageKey, WhitelistedStorageKeys,
 };
 
 mod dispatch;
-#[allow(deprecated)]
-pub use dispatch::EnsureOneOf;
 pub use dispatch::{
 	AsEnsureOriginWithArg, Authorize, CallerTrait, EitherOf, EitherOfDiverse, EnsureOrigin,
 	EnsureOriginEqualOrHigherPrivilege, EnsureOriginWithArg, MapSuccess, NeverEnsureOrigin,
@@ -137,6 +136,9 @@ pub use tasks::Task;
 
 mod proving;
 pub use proving::*;
+
+mod rewards;
+pub use rewards::RewardsPool;
 
 #[cfg(feature = "try-runtime")]
 mod try_runtime;

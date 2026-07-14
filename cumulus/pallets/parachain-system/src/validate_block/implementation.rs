@@ -16,29 +16,26 @@
 
 //! The actual implementation of the validate block functionality.
 
-use super::{trie_cache, trie_recorder, MemoryOptimizedValidationParams};
-use crate::parachain_inherent::BasicParachainInherentData;
+use super::{scheduling, trie_cache, trie_recorder, MemoryOptimizedValidationParams};
 use alloc::vec::Vec;
 use codec::{Decode, Encode};
 use cumulus_primitives_core::{
 	relay_chain::{
-		vstaging::{UMPSignal, UMP_SEPARATOR},
-		Hash as RHash,
+		BlockNumber as RNumber, Hash as RHash, UMPSignal, MAX_HEAD_DATA_SIZE, UMP_SEPARATOR,
 	},
-	ClaimQueueOffset, CoreSelector, ParachainBlockData, PersistedValidationData,
+	ClaimQueueOffset, CoreSelector, CumulusDigestItem, ParachainBlockData, PersistedValidationData,
+	VerifySchedulingSignature,
 };
 use frame_support::{
 	traits::{ExecuteBlock, Get, IsSubType},
 	BoundedVec,
 };
-use polkadot_parachain_primitives::primitives::{
-	HeadData, RelayChainBlockNumber, ValidationResult,
-};
+use polkadot_parachain_primitives::primitives::{HeadData, ValidationResult};
 use sp_core::storage::{well_known_keys, ChildInfo, StateVersion};
 use sp_externalities::{set_and_run_with_externalities, Externalities};
 use sp_io::{hashing::blake2_128, KillStorageResult};
 use sp_runtime::traits::{
-	Block as BlockT, ExtrinsicCall, ExtrinsicLike, Hash as HashT, HashingFor, Header as HeaderT,
+	Block as BlockT, ExtrinsicCall, Hash as HashT, HashingFor, Header as HeaderT, LazyBlock,
 };
 use sp_state_machine::OverlayedChanges;
 use sp_trie::{HashDBT, ProofSizeProvider, EMPTY_PREFIX};
@@ -72,32 +69,28 @@ environmental::environmental!(recorder: trait ProofSizeProvider);
 /// we have the in-memory database that contains all the values from the state of the parachain
 /// that we require to verify the block.
 ///
-/// 5. We are going to run `check_inherents`. This is important to check stuff like the timestamp
-/// matching the real world time.
-///
-/// 6. The last step is to execute the entire block in the machinery we just have setup. Executing
+/// 5. The last step is to execute the entire block in the machinery we just have setup. Executing
 /// the blocks include running all transactions in the block against our in-memory database and
 /// ensuring that the final storage root matches the storage root in the header of the block. In the
 /// end we return back the [`ValidationResult`] with all the required information for the validator.
 #[doc(hidden)]
-#[allow(deprecated)]
-pub fn validate_block<
-	B: BlockT,
-	E: ExecuteBlock<B>,
-	PSC: crate::Config,
-	CI: crate::CheckInherents<B>,
->(
+pub fn validate_block<B: BlockT, E: ExecuteBlock<B>, PSC: crate::Config>(
 	MemoryOptimizedValidationParams {
 		block_data,
 		parent_head: parachain_head,
 		relay_parent_number,
 		relay_parent_storage_root,
+		extension,
 	}: MemoryOptimizedValidationParams,
 ) -> ValidationResult
 where
 	B::Extrinsic: ExtrinsicCall,
 	<B::Extrinsic as ExtrinsicCall>::Call: IsSubType<crate::Call<PSC>>,
 {
+	// Decode block data first - we need it for both scheduling validation and block execution
+	let block_data = codec::decode_from_bytes::<ParachainBlockData<B::LazyBlock>>(block_data)
+		.expect("Invalid parachain block data");
+
 	let _guard = (
 		// Replace storage calls with our own implementations
 		sp_io::storage::host_read.replace_implementation(host_storage_read),
@@ -137,13 +130,27 @@ where
 		sp_io::offchain_index::host_clear.replace_implementation(host_offchain_index_clear),
 		cumulus_primitives_proof_size_hostfunction::storage_proof_size::host_storage_proof_size
 			.replace_implementation(host_storage_proof_size),
+		#[cfg(feature = "transaction-index")]
+		sp_io::transaction_index::host_index.replace_implementation(host_transaction_index_index),
+		#[cfg(feature = "transaction-index")]
+		sp_io::transaction_index::host_renew.replace_implementation(host_transaction_index_renew),
 	);
 
-	let block_data = codec::decode_from_bytes::<ParachainBlockData<B>>(block_data)
-		.expect("Invalid parachain block data");
+	// V3 scheduling validation.
+	let validated_scheduling = scheduling::validate_v3_scheduling(
+		PSC::SchedulingSignatureVerifier::V3_SCHEDULING_ENABLED,
+		&extension.0,
+		block_data.scheduling_proof(),
+		PSC::RelayParentOffset::get(),
+	);
+	if let Some(result) = validated_scheduling {
+		if result.is_resubmission {
+			panic!("Resubmission not yet supported; reject candidate.");
+		}
+	}
 
 	// Initialize hashmaps randomness.
-	sp_trie::add_extra_randomness(build_seed_from_head_data(
+	sp_trie::add_extra_randomness(build_seed_from_head_data::<B>(
 		&block_data,
 		relay_parent_storage_root,
 	));
@@ -153,26 +160,7 @@ where
 
 	let (blocks, proof) = block_data.into_inner();
 
-	assert_eq!(
-		*blocks
-			.first()
-			.expect("BlockData should have at least one block")
-			.header()
-			.parent_hash(),
-		parent_header.hash(),
-		"Parachain head needs to be the parent of the first block"
-	);
-
-	blocks.iter().fold(parent_header.hash(), |p, b| {
-		assert_eq!(
-			p,
-			*b.header().parent_hash(),
-			"Not a valid chain of blocks :(; {:?} not a parent of {:?}?",
-			array_bytes::bytes2hex("0x", p.as_ref()),
-			array_bytes::bytes2hex("0x", b.header().parent_hash().as_ref()),
-		);
-		b.header().hash()
-	});
+	verify_blocks_form_chain::<B>(&blocks, &parent_header);
 
 	let mut processed_downward_messages = 0;
 	let mut upward_messages = BoundedVec::default();
@@ -194,7 +182,7 @@ where
 	let cache_provider = trie_cache::CacheProvider::new();
 	let seen_nodes = SeenNodes::<HashingFor<B>>::default();
 
-	for (block_index, block) in blocks.into_iter().enumerate() {
+	for (block_index, mut block) in blocks.into_iter().enumerate() {
 		// We use the storage root of the `parent_head` to ensure that it is the correct root.
 		// This is already being done above while creating the in-memory db, but let's be paranoid!!
 		let backend = sp_state_machine::TrieBackendBuilder::new_with_cache(
@@ -204,9 +192,8 @@ where
 		)
 		.build();
 
-		// We use the same recorder when executing all blocks. So, each node only contributes once
-		// to the total size of the storage proof. This recorder should only be used for
-		// `execute_block`.
+		// Each node only contributes once to the total size of the storage proof. So, we keep track
+		// of them inside `seen_nodes` to always return the correct proof size.
 		let mut execute_recorder = SizeOnlyRecorderProvider::with_seen_nodes(seen_nodes.clone());
 		// `backend` with the `execute_recorder`. As the `execute_recorder`, this should only be
 		// used for `execute_block`.
@@ -214,65 +201,43 @@ where
 			.with_recorder(execute_recorder.clone())
 			.build();
 
-		// We let all blocks contribute to the same overlay. Data written by a previous block will
-		// be directly accessible without going to the db.
 		let mut overlay = OverlayedChanges::default();
 
 		parent_header = block.header().clone();
-		let inherent_data = extract_parachain_inherent_data(&block);
 
-		validate_validation_data(
-			&inherent_data.validation_data,
-			relay_parent_number,
-			relay_parent_storage_root,
-			&parachain_head,
-		);
-
-		// We don't need the recorder or the overlay in here.
 		run_with_externalities_and_recorder::<B, _, _>(
 			&backend,
 			&mut Default::default(),
 			&mut Default::default(),
 			|| {
-				let relay_chain_proof = crate::RelayChainStateProof::new(
-					PSC::SelfParaId::get(),
-					inherent_data.validation_data.relay_parent_storage_root,
-					inherent_data.relay_chain_state.clone(),
-				)
-				.expect("Invalid relay chain state proof");
-
-				#[allow(deprecated)]
-				let res = CI::check_inherents(&block, &relay_chain_proof);
-
-				if !res.ok() {
-					if log::log_enabled!(log::Level::Error) {
-						res.into_errors().for_each(|e| {
-							log::error!("Checking inherent with identifier `{:?}` failed", e.0)
-						});
-					}
-
-					panic!("Checking inherents failed");
-				}
+				E::verify_and_remove_seal(&mut block);
 			},
 		);
 
 		run_with_externalities_and_recorder::<B, _, _>(
 			&execute_backend,
 			// Here is the only place where we want to use the recorder.
-			// We want to ensure that we not accidentally read something from the proof, that was
-			// not yet read and thus, alter the proof size. Otherwise we end up with mismatches in
-			// later blocks.
+			// We want to ensure that we not accidentally read something from the proof, that
+			// was not yet read and thus, alter the proof size. Otherwise, we end up with
+			// mismatches in later blocks.
 			&mut execute_recorder,
 			&mut overlay,
 			|| {
-				E::execute_block(block);
+				E::execute_verified_block(block);
 			},
 		);
 
-		if overlay.storage(well_known_keys::CODE).is_some() && num_blocks > 1 {
-			panic!("When applying a runtime upgrade, only one block per PoV is allowed. Received {num_blocks}.")
+		let code_upgrade_detected =
+			if <PSC as frame_system::Config>::Version::get().system_version >= 3 {
+				overlay.storage(well_known_keys::PENDING_CODE).is_some()
+			} else {
+				overlay.storage(well_known_keys::CODE).is_some()
+			};
+		if code_upgrade_detected && num_blocks > 1 {
+			panic!(
+				"When applying a runtime upgrade, only one block per PoV is allowed. Received {num_blocks}."
+			)
 		}
-
 		run_with_externalities_and_recorder::<B, _, _>(
 			&backend,
 			&mut Default::default(),
@@ -280,6 +245,15 @@ where
 			// are passing here the overlay.
 			&mut overlay,
 			|| {
+				// Ensure the validation data is correct.
+				validate_validation_data(
+					crate::ValidationData::<PSC>::get()
+						.expect("`ValidationData` must be set after executing a block; qed"),
+					&parachain_head,
+					relay_parent_number,
+					relay_parent_storage_root,
+				);
+
 				new_validation_code =
 					new_validation_code.take().or(crate::NewValidationCode::<PSC>::get());
 
@@ -288,34 +262,29 @@ where
 					.into_iter()
 					.filter_map(|m| {
 						// Filter out the `UMP_SEPARATOR` and the `UMPSignals`.
-						if cfg!(feature = "experimental-ump-signals") {
-							if m == UMP_SEPARATOR {
-								found_separator = true;
-								None
-							} else if found_separator {
-								if upward_message_signals.iter().all(|s| *s != m) {
-									upward_message_signals.push(m);
-								}
-								None
-							} else {
-								// No signal or separator
-								Some(m)
-							}
+						if m == UMP_SEPARATOR {
+							found_separator = true;
+							None
+						} else if found_separator {
+							upward_message_signals.push(m);
+							None
 						} else {
+							// No signal or separator
 							Some(m)
 						}
 					})
 					.for_each(|m| {
-						upward_messages.try_push(m)
-							.expect(
-								"Number of upward messages should not be greater than `MAX_UPWARD_MESSAGE_NUM`",
-							)
+						upward_messages.try_push(m).expect(
+							"Number of upward messages should not be greater than `MAX_UPWARD_MESSAGE_NUM`",
+						)
 					});
 
 				processed_downward_messages += crate::ProcessedDownwardMessages::<PSC>::get();
-				horizontal_messages.try_extend(crate::HrmpOutboundMessages::<PSC>::get().into_iter()).expect(
-					"Number of horizontal messages should not be greater than `MAX_HORIZONTAL_MESSAGE_NUM`",
-				);
+				horizontal_messages
+					.try_extend(crate::HrmpOutboundMessages::<PSC>::get().into_iter())
+					.expect(
+						"Number of horizontal messages should not be greater than `MAX_HORIZONTAL_MESSAGE_NUM`",
+					);
 				hrmp_watermark = crate::HrmpWatermark::<PSC>::get();
 
 				if block_index + 1 == num_blocks {
@@ -385,10 +354,13 @@ where
 		upward_messages
 			.try_push(UMP_SEPARATOR)
 			.expect("UMPSignals does not fit in UMPMessages");
+
 		upward_messages
 			.try_extend(upward_message_signals.into_iter())
 			.expect("UMPSignals does not fit in UMPMessages");
 	}
+
+	horizontal_messages.sort_by(|a, b| a.recipient.cmp(&b.recipient));
 
 	ValidationResult {
 		head_data: head_data.expect("HeadData not set"),
@@ -400,35 +372,14 @@ where
 	}
 }
 
-/// Extract the [`BasicParachainInherentData`].
-fn extract_parachain_inherent_data<B: BlockT, PSC: crate::Config>(
-	block: &B,
-) -> &BasicParachainInherentData
-where
-	B::Extrinsic: ExtrinsicCall,
-	<B::Extrinsic as ExtrinsicCall>::Call: IsSubType<crate::Call<PSC>>,
-{
-	block
-		.extrinsics()
-		.iter()
-		// Inherents are at the front of the block and are unsigned.
-		.take_while(|e| e.is_bare())
-		.filter_map(|e| e.call().is_sub_type())
-		.find_map(|c| match c {
-			crate::Call::set_validation_data { data: validation_data, .. } => Some(validation_data),
-			_ => None,
-		})
-		.expect("Could not find `set_validation_data` inherent")
-}
-
-/// Validate the given [`PersistedValidationData`] against the [`MemoryOptimizedValidationParams`].
+/// Validates the given [`PersistedValidationData`] against the data from the relay chain.
 fn validate_validation_data(
-	validation_data: &PersistedValidationData,
-	relay_parent_number: RelayChainBlockNumber,
+	validation_data: PersistedValidationData,
+	parent_header: &[u8],
+	relay_parent_number: RNumber,
 	relay_parent_storage_root: RHash,
-	parent_head: &[u8],
 ) {
-	assert_eq!(parent_head, validation_data.parent_head.0, "Parent head doesn't match");
+	assert_eq!(parent_header, &validation_data.parent_head.0, "Parent head doesn't match");
 	assert_eq!(
 		relay_parent_number, validation_data.relay_parent_number,
 		"Relay parent number doesn't match",
@@ -439,13 +390,89 @@ fn validate_validation_data(
 	);
 }
 
+fn verify_blocks_form_chain<B: BlockT>(blocks: &[B::LazyBlock], parent_header: &B::Header) {
+	let num_blocks = blocks.len();
+
+	// Check first block's parent matches the given parent_header
+	assert_eq!(
+		*blocks
+			.first()
+			.expect("BlockData should have at least one block")
+			.header()
+			.parent_hash(),
+		parent_header.hash(),
+		"Parachain head needs to be the parent of the first block"
+	);
+
+	let mut first_block_has_bundle_info: Option<bool> = None;
+
+	blocks.iter().enumerate().fold(
+		parent_header.hash(),
+		|expected_parent, (block_index, block)| {
+			// Check chain validity
+			assert_eq!(
+				expected_parent,
+				*block.header().parent_hash(),
+				"Not a valid chain of blocks :(; {:?} not a parent of {:?}?",
+				array_bytes::bytes2hex("0x", expected_parent.as_ref()),
+				array_bytes::bytes2hex("0x", block.header().parent_hash().as_ref()),
+			);
+
+			let encoded_header_size = block.header().encoded_size();
+			assert!(
+				encoded_header_size <= MAX_HEAD_DATA_SIZE as usize,
+				"Header size {encoded_header_size} exceeds MAX_HEAD_DATA_SIZE {MAX_HEAD_DATA_SIZE}",
+			);
+
+			// Validate BlockBundleInfo consistency
+			let bundle_info = CumulusDigestItem::find_block_bundle_info(block.header().digest());
+			match (first_block_has_bundle_info, &bundle_info) {
+				(None, info) => {
+					first_block_has_bundle_info = Some(info.is_some());
+				},
+				(Some(true), None) => {
+					panic!("All blocks in a bundled PoV must include `BlockBundleInfo`");
+				},
+				(Some(false), _) => {
+					panic!("A PoV without `BlockBundleInfo` may only contain a single block");
+				},
+				_ => {},
+			}
+
+			if let Some(ref info) = bundle_info {
+				assert_eq!(
+					info.index as usize, block_index,
+					"BlockBundleInfo index mismatch: expected {block_index}, got {}",
+					info.index
+				);
+
+				if block_index + 1 < num_blocks {
+					assert!(
+						!CumulusDigestItem::is_last_block_in_core(block.header().digest()).unwrap_or(false),
+						"Intermediate block at index {block_index} is marked as last block in core, \
+						but more blocks follow in the PoV",
+					);
+				} else if !CumulusDigestItem::is_last_block_in_core(block.header().digest())
+					.unwrap_or(true)
+				{
+					panic!(
+						"Last block in PoV must include the digest that marks it as the last block in the core"
+					);
+				}
+			}
+
+			block.header().hash()
+		},
+	);
+}
+
 /// Build a seed from the head data of the parachain block.
 ///
 /// Uses both the relay parent storage root and the hash of the blocks
 /// in the block data, to make sure the seed changes every block and that
 /// the user cannot find about it ahead of time.
 fn build_seed_from_head_data<B: BlockT>(
-	block_data: &ParachainBlockData<B>,
+	block_data: &ParachainBlockData<B::LazyBlock>,
 	relay_parent_storage_root: crate::relay_chain::Hash,
 ) -> [u8; 16] {
 	let mut bytes_to_hash = Vec::with_capacity(
@@ -606,3 +633,21 @@ fn host_default_child_storage_next_key(storage_key: &[u8], key: &[u8]) -> Option
 fn host_offchain_index_set(_key: &[u8], _value: &[u8]) {}
 
 fn host_offchain_index_clear(_key: &[u8]) {}
+
+/// Parachain validation does not require maintaining a transaction index,
+/// and indexing transactions does **not** contribute to the parachain state.
+/// However, the host environment still expects this function to exist,
+/// so we provide a no-op implementation.
+#[cfg(feature = "transaction-index")]
+fn host_transaction_index_index(_extrinsic: u32, _size: u32, _context_hash: [u8; 32]) {
+	// No-op host function used during parachain validation.
+}
+
+/// Parachain validation does not require maintaining a transaction index,
+/// and indexing transactions does **not** contribute to the parachain state.
+/// However, the host environment still expects this function to exist,
+/// so we provide a no-op implementation.
+#[cfg(feature = "transaction-index")]
+fn host_transaction_index_renew(_extrinsic: u32, _context_hash: [u8; 32]) {
+	// No-op host function used during parachain validation.
+}

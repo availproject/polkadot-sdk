@@ -14,34 +14,65 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-mod instructions;
-
 use crate::{
-	vm::{BytecodeType, ExecResult, Ext},
-	AccountIdOf, CodeInfo, Config, ContractBlob, DispatchError, Error, ExecReturnValue, H256,
-	LOG_TARGET,
+	AccountIdOf, BalanceOf, CodeInfo, Config, ContractBlob, DispatchError, Error, H256, LOG_TARGET,
+	Weight,
+	debug::DebugSettings,
+	precompiles::Token,
+	tracing,
+	vm::{BytecodeType, ExecResult, Ext, evm::instructions::exec_instruction},
+	weights::WeightInfo,
 };
 use alloc::vec::Vec;
-use instructions::instruction_table;
-use pallet_revive_uapi::ReturnFlags;
-use revm::{
-	bytecode::Bytecode,
-	interpreter::{
-		host::DummyHost,
-		interpreter::{ExtBytecode, ReturnDataImpl, RuntimeFlags},
-		interpreter_action::InterpreterAction,
-		interpreter_types::InputsTr,
-		CallInput, Gas, Interpreter, InterpreterResult, InterpreterTypes, SharedMemory, Stack,
-	},
-	primitives::{self, hardfork::SpecId, Address, Bytes},
-};
+use core::{convert::Infallible, ops::ControlFlow};
+use revm::{bytecode::Bytecode, primitives::Bytes};
+
+#[cfg(feature = "runtime-benchmarks")]
+pub mod instructions;
+#[cfg(not(feature = "runtime-benchmarks"))]
+mod instructions;
+
+mod interpreter;
+pub use interpreter::{Halt, Interpreter};
+
+mod ext_bytecode;
+use ext_bytecode::ExtBytecode;
+
+mod memory;
+mod stack;
+mod util;
+
+/// Hard-coded value returned by the EVM `DIFFICULTY` opcode.
+///
+/// After Ethereum's Merge (Sept 2022), the `DIFFICULTY` opcode was redefined to return
+/// `prevrandao`, a randomness value from the beacon chain. In Substrate pallet-revive
+/// a fixed constant is returned instead for compatibility with contracts that still read this
+/// opcode. The value is aligned with the difficulty hardcoded for PVM contracts.
+pub(crate) const DIFFICULTY: u64 = 2500000000000000_u64;
+
+/// Cost  for a single unit of EVM gas.
+#[derive(Eq, PartialEq, Debug, Clone, Copy)]
+pub struct EVMGas(pub u64);
+
+impl<T: Config> Token<T> for EVMGas {
+	fn weight(&self) -> Weight {
+		let base_cost = T::WeightInfo::evm_opcode(1).saturating_sub(T::WeightInfo::evm_opcode(0));
+		base_cost.saturating_mul(self.0)
+	}
+}
 
 impl<T: Config> ContractBlob<T> {
 	/// Create a new contract from EVM init code.
 	pub fn from_evm_init_code(code: Vec<u8>, owner: AccountIdOf<T>) -> Result<Self, DispatchError> {
-		if code.len() > revm::primitives::eip3860::MAX_INITCODE_SIZE {
+		if code.len() > revm::primitives::eip3860::MAX_INITCODE_SIZE &&
+			!DebugSettings::is_unlimited_contract_size_allowed::<T>()
+		{
 			return Err(<Error<T>>::BlobTooLarge.into());
+		}
+
+		// EIP-3541: Reject new contract code starting with the 0xEF byte
+		if code.first() == Some(&0xEF) {
+			return Err(<Error<T>>::CodeRejected.into());
 		}
 
 		let code_len = code.len() as u32;
@@ -69,12 +100,31 @@ impl<T: Config> ContractBlob<T> {
 		code: Vec<u8>,
 		owner: AccountIdOf<T>,
 	) -> Result<Self, DispatchError> {
-		if code.len() > revm::primitives::eip170::MAX_CODE_SIZE {
+		let code_len = code.len() as u32;
+		let deposit = super::calculate_code_deposit::<T>(code_len);
+		Self::from_evm_runtime_code_with_deposit(code, owner, deposit)
+	}
+
+	/// Create a new contract from EVM runtime code with an explicit owner and
+	/// deposit amount.
+	///
+	/// Used for `Origin::Root` uploads: there is no origin account to attribute
+	/// the deposit to, so the caller passes the pallet's own account as a
+	/// sentinel owner (no user can sign as it, so the code can't be removed via
+	/// the owner-gated path) and a zero deposit (both `charge_deposit` and
+	/// `refund_deposit` short-circuit at amount 0).
+	pub fn from_evm_runtime_code_with_deposit(
+		code: Vec<u8>,
+		owner: AccountIdOf<T>,
+		deposit: BalanceOf<T>,
+	) -> Result<Self, DispatchError> {
+		if code.len() > revm::primitives::eip170::MAX_CODE_SIZE &&
+			!DebugSettings::is_unlimited_contract_size_allowed::<T>()
+		{
 			return Err(<Error<T>>::BlobTooLarge.into());
 		}
 
 		let code_len = code.len() as u32;
-		let deposit = super::calculate_code_deposit::<T>(code_len);
 
 		let code_info = CodeInfo {
 			owner,
@@ -96,130 +146,41 @@ impl<T: Config> ContractBlob<T> {
 }
 
 /// Calls the EVM interpreter with the provided bytecode and inputs.
-pub fn call<'a, E: Ext>(bytecode: Bytecode, ext: &'a mut E, inputs: EVMInputs) -> ExecResult {
-	let mut interpreter: Interpreter<EVMInterpreter<'a, E>> = Interpreter {
-		gas: Gas::default(),
-		bytecode: ExtBytecode::new(bytecode),
-		stack: Stack::new(),
-		return_data: Default::default(),
-		memory: SharedMemory::new(),
-		input: inputs,
-		runtime_flag: RuntimeFlags { is_static: false, spec_id: SpecId::default() },
-		extend: ext,
-	};
+pub fn call<E: Ext>(bytecode: Bytecode, ext: &mut E, input: Vec<u8>) -> ExecResult {
+	let mut interpreter = Interpreter::new(ExtBytecode::new(bytecode), input, ext);
+	let tracing_enabled = tracing::if_tracing(|t| t.is_execution_tracer()).unwrap_or(false);
 
-	let table = instruction_table::<'a, E>();
-	let result = run(&mut interpreter, &table);
-
-	if result.is_error() {
-		Err(Error::<E::T>::ContractTrapped.into())
+	let ControlFlow::Break(halt) = if tracing_enabled {
+		run_plain_with_tracing(&mut interpreter)
 	} else {
-		Ok(ExecReturnValue {
-			flags: if result.is_revert() { ReturnFlags::REVERT } else { ReturnFlags::empty() },
-			data: result.output.to_vec(),
-		})
+		run_plain(&mut interpreter)
+	};
+	halt.into()
+}
+
+fn run_plain<E: Ext>(interpreter: &mut Interpreter<E>) -> ControlFlow<Halt, Infallible> {
+	loop {
+		let opcode = interpreter.bytecode.opcode();
+		interpreter.bytecode.relative_jump(1);
+		exec_instruction(interpreter, opcode)?;
 	}
 }
 
-/// Runs the EVM interpreter
-fn run<WIRE: InterpreterTypes>(
-	interpreter: &mut Interpreter<WIRE>,
-	table: &revm::interpreter::InstructionTable<WIRE, DummyHost>,
-) -> InterpreterResult {
-	let host = &mut DummyHost {};
-	let action = interpreter.run_plain(table, host);
-	match action {
-		InterpreterAction::Return(result) => return result,
-		InterpreterAction::NewFrame(_) => {
-			// TODO handle new frame
-			InterpreterResult::new(
-				revm::interpreter::InstructionResult::FatalExternalError,
-				Default::default(),
-				interpreter.gas,
-			)
-		},
-	}
-}
+fn run_plain_with_tracing<E: Ext>(
+	interpreter: &mut Interpreter<E>,
+) -> ControlFlow<Halt, Infallible> {
+	loop {
+		let opcode = interpreter.bytecode.opcode();
+		tracing::if_tracing(|tracer| {
+			let pc = interpreter.bytecode.pc() as u64;
+			tracer.enter_opcode(pc, opcode, interpreter)
+		});
 
-/// EVMInterpreter implements the `InterpreterTypes`.
-///
-/// Note:
-///
-/// Our implementation set the `InterpreterTypes::Extend` associated type, to the `Ext` trait, to
-/// reuse all the host functions that are defined by this trait
-pub struct EVMInterpreter<'a, E: Ext> {
-	_phantom: core::marker::PhantomData<&'a E>,
-}
+		interpreter.bytecode.relative_jump(1);
+		let res = exec_instruction(interpreter, opcode);
 
-impl<'a, E: Ext> InterpreterTypes for EVMInterpreter<'a, E> {
-	type Stack = Stack;
-	type Memory = SharedMemory;
-	type Bytecode = ExtBytecode;
-	type ReturnData = ReturnDataImpl;
-	type Input = EVMInputs;
-	type RuntimeFlag = RuntimeFlags;
-	type Extend = &'a mut E;
-	type Output = InterpreterAction;
-}
+		tracing::if_tracing(|tracer| tracer.exit_step(interpreter, None));
 
-/// EVMInputs implements the `InputsTr` trait for EVM inputs, allowing the EVM interpreter to access
-/// the call input data.
-///
-/// Note:
-///
-/// In our implementation of the instruction table, Everything except the call input data will be
-/// accessed through the `InterpreterTypes::Extend` associated type, our implementation will panic
-/// if any of those methods are called.
-#[derive(Debug, Clone, Default)]
-pub struct EVMInputs(CallInput);
-
-impl EVMInputs {
-	pub fn new(input: Vec<u8>) -> Self {
-		Self(CallInput::Bytes(input.into()))
-	}
-}
-
-impl InputsTr for EVMInputs {
-	fn target_address(&self) -> Address {
-		panic!()
-	}
-
-	fn caller_address(&self) -> Address {
-		panic!()
-	}
-
-	fn bytecode_address(&self) -> Option<&Address> {
-		panic!()
-	}
-
-	fn input(&self) -> &CallInput {
-		&self.0
-	}
-
-	fn call_value(&self) -> primitives::U256 {
-		// TODO replae by panic once instruction that use call_value are updated
-		primitives::U256::ZERO
-	}
-}
-
-/// Blanket conversion trait between `sp_core::U256` and `revm::primitives::U256`
-#[allow(dead_code)]
-pub trait U256Converter {
-	/// Convert `self` into `revm::primitives::U256`
-	fn into_revm_u256(&self) -> revm::primitives::U256;
-
-	/// Convert from `revm::primitives::U256` into `Self`
-	fn from_revm_u256(value: &revm::primitives::U256) -> Self;
-}
-
-impl U256Converter for sp_core::U256 {
-	fn into_revm_u256(&self) -> revm::primitives::U256 {
-		let bytes = self.to_big_endian();
-		revm::primitives::U256::from_be_bytes(bytes)
-	}
-
-	fn from_revm_u256(value: &revm::primitives::U256) -> Self {
-		let bytes = value.to_be_bytes::<32>();
-		sp_core::U256::from_big_endian(&bytes)
+		res?;
 	}
 }

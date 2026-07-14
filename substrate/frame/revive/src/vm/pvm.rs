@@ -19,25 +19,24 @@
 
 pub mod env;
 
-#[cfg(doc)]
-pub use env::SyscallDoc;
-
 use crate::{
-	evm::runtime::GAS_PRICE,
-	exec::{ExecError, ExecResult, Ext, Key},
-	gas::ChargedAmount,
+	Code, Config, Error, LOG_TARGET, Pallet, ReentrancyProtection, RuntimeCosts, SENTINEL,
+	exec::{CallResources, ExecError, ExecResult, Ext, Key},
 	limits,
+	metering::ChargedAmount,
 	precompiles::{All as AllPrecompiles, Precompiles},
 	primitives::ExecReturnValue,
-	BalanceOf, Config, Error, Pallet, RuntimeCosts, LOG_TARGET, SENTINEL,
+	tracing::FrameTraceInfo,
 };
 use alloc::{vec, vec::Vec};
 use codec::Encode;
 use core::{fmt, marker::PhantomData, mem};
+#[cfg(doc)]
+pub use env::SyscallDoc;
 use frame_support::{ensure, weights::Weight};
 use pallet_revive_uapi::{CallFlags, ReturnErrorCode, ReturnFlags, StorageFlags};
 use sp_core::{H160, H256, U256};
-use sp_runtime::{DispatchError, RuntimeDebug};
+use sp_runtime::DispatchError;
 
 /// Extracts the code and data from a given program blob.
 pub fn extract_code_and_data(data: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
@@ -59,7 +58,7 @@ pub trait Memory<T: Config> {
 	/// Returns `Err` if one of the following conditions occurs:
 	///
 	/// - requested buffer is not within the bounds of the sandbox memory.
-	fn read_into_buf(&self, ptr: u32, buf: &mut [u8]) -> Result<(), DispatchError>;
+	fn read_into_buf(&mut self, ptr: u32, buf: &mut [u8]) -> Result<(), DispatchError>;
 
 	/// Write the given buffer to the designated location in the sandbox memory.
 	///
@@ -87,40 +86,40 @@ pub trait Memory<T: Config> {
 	/// Returns `Err` if one of the following conditions occurs:
 	///
 	/// - requested buffer is not within the bounds of the sandbox memory.
-	fn read(&self, ptr: u32, len: u32) -> Result<Vec<u8>, DispatchError> {
+	fn read(&mut self, ptr: u32, len: u32) -> Result<Vec<u8>, DispatchError> {
 		let mut buf = vec![0u8; len as usize];
 		self.read_into_buf(ptr, buf.as_mut_slice())?;
 		Ok(buf)
 	}
 
 	/// Same as `read` but reads into a fixed size buffer.
-	fn read_array<const N: usize>(&self, ptr: u32) -> Result<[u8; N], DispatchError> {
+	fn read_array<const N: usize>(&mut self, ptr: u32) -> Result<[u8; N], DispatchError> {
 		let mut buf = [0u8; N];
 		self.read_into_buf(ptr, &mut buf)?;
 		Ok(buf)
 	}
 
 	/// Read a `u32` from the sandbox memory.
-	fn read_u32(&self, ptr: u32) -> Result<u32, DispatchError> {
+	fn read_u32(&mut self, ptr: u32) -> Result<u32, DispatchError> {
 		let buf: [u8; 4] = self.read_array(ptr)?;
 		Ok(u32::from_le_bytes(buf))
 	}
 
 	/// Read a `U256` from the sandbox memory.
-	fn read_u256(&self, ptr: u32) -> Result<U256, DispatchError> {
+	fn read_u256(&mut self, ptr: u32) -> Result<U256, DispatchError> {
 		let buf: [u8; 32] = self.read_array(ptr)?;
 		Ok(U256::from_little_endian(&buf))
 	}
 
 	/// Read a `H160` from the sandbox memory.
-	fn read_h160(&self, ptr: u32) -> Result<H160, DispatchError> {
+	fn read_h160(&mut self, ptr: u32) -> Result<H160, DispatchError> {
 		let mut buf = H160::default();
 		self.read_into_buf(ptr, buf.as_bytes_mut())?;
 		Ok(buf)
 	}
 
 	/// Read a `H256` from the sandbox memory.
-	fn read_h256(&self, ptr: u32) -> Result<H256, DispatchError> {
+	fn read_h256(&mut self, ptr: u32) -> Result<H256, DispatchError> {
 		let mut code_hash = H256::default();
 		self.read_into_buf(ptr, code_hash.as_bytes_mut())?;
 		Ok(code_hash)
@@ -147,7 +146,7 @@ pub trait PolkaVmInstance<T: Config>: Memory<T> {
 // in the streaming implementation while it could fail with a segfault in the copy implementation.
 #[cfg(feature = "runtime-benchmarks")]
 impl<T: Config> Memory<T> for [u8] {
-	fn read_into_buf(&self, ptr: u32, buf: &mut [u8]) -> Result<(), DispatchError> {
+	fn read_into_buf(&mut self, ptr: u32, buf: &mut [u8]) -> Result<(), DispatchError> {
 		let ptr = ptr as usize;
 		let bound_checked =
 			self.get(ptr..ptr + buf.len()).ok_or_else(|| Error::<T>::OutOfBounds)?;
@@ -171,7 +170,7 @@ impl<T: Config> Memory<T> for [u8] {
 }
 
 impl<T: Config> Memory<T> for polkavm::RawInstance {
-	fn read_into_buf(&self, ptr: u32, buf: &mut [u8]) -> Result<(), DispatchError> {
+	fn read_into_buf(&mut self, ptr: u32, buf: &mut [u8]) -> Result<(), DispatchError> {
 		self.read_memory_into(ptr, buf)
 			.map(|_| ())
 			.map_err(|_| Error::<T>::OutOfBounds.into())
@@ -217,16 +216,12 @@ impl<T: Config> PolkaVmInstance<T> for polkavm::RawInstance {
 
 impl From<&ExecReturnValue> for ReturnErrorCode {
 	fn from(from: &ExecReturnValue) -> Self {
-		if from.flags.contains(ReturnFlags::REVERT) {
-			Self::CalleeReverted
-		} else {
-			Self::Success
-		}
+		if from.flags.contains(ReturnFlags::REVERT) { Self::CalleeReverted } else { Self::Success }
 	}
 }
 
 /// The data passed through when a contract uses `seal_return`.
-#[derive(RuntimeDebug)]
+#[derive(Debug)]
 pub struct ReturnData {
 	/// The flags as passed through by the contract. They are still unchecked and
 	/// will later be parsed into a `ReturnFlags` bitflags struct.
@@ -241,7 +236,7 @@ pub struct ReturnData {
 /// occurred (the SupervisorError variant).
 /// The other case is where the trap does not constitute an error but rather was invoked
 /// as a quick way to terminate the application (all other variants).
-#[derive(RuntimeDebug)]
+#[derive(Debug)]
 pub enum TrapReason {
 	/// The supervisor trapped the contract because of an error condition occurred during
 	/// execution in privileged code.
@@ -270,9 +265,7 @@ impl fmt::Display for TrapReason {
 /// We need this access as a macro because sometimes hiding the lifetimes behind
 /// a function won't work out.
 macro_rules! charge_gas {
-	($runtime:expr, $costs:expr) => {{
-		$runtime.ext.gas_meter_mut().charge($costs)
-	}};
+	($runtime:expr, $costs:expr) => {{ $runtime.ext.frame_meter_mut().charge_weight_token($costs) }};
 }
 
 /// The kind of call that should be performed.
@@ -357,7 +350,7 @@ impl<'a, E: Ext, M: ?Sized + Memory<E::T>> Runtime<'a, E, M> {
 	/// This is when a maximum a priori amount was charged and then should be partially
 	/// refunded to match the actual amount.
 	fn adjust_gas(&mut self, charged: ChargedAmount, actual_costs: RuntimeCosts) {
-		self.ext.gas_meter_mut().adjust_gas(charged, actual_costs);
+		self.ext.frame_meter_mut().adjust_weight(charged, actual_costs);
 	}
 
 	/// Write the given buffer and its length to the designated locations in sandbox memory and
@@ -458,32 +451,7 @@ impl<'a, E: Ext, M: ?Sized + Memory<E::T>> Runtime<'a, E, M> {
 		Ok(())
 	}
 
-	/// Fallible conversion of a `ExecError` to `ReturnErrorCode`.
-	///
-	/// This is used when converting the error returned from a subcall in order to decide
-	/// whether to trap the caller or allow handling of the error.
-	fn exec_error_into_return_code(from: ExecError) -> Result<ReturnErrorCode, DispatchError> {
-		use crate::exec::ErrorOrigin::Callee;
-		use ReturnErrorCode::*;
-
-		let transfer_failed = Error::<E::T>::TransferFailed.into();
-		let out_of_gas = Error::<E::T>::OutOfGas.into();
-		let out_of_deposit = Error::<E::T>::StorageDepositLimitExhausted.into();
-		let duplicate_contract = Error::<E::T>::DuplicateContract.into();
-		let unsupported_precompile = Error::<E::T>::UnsupportedPrecompileAddress.into();
-
-		// errors in the callee do not trap the caller
-		match (from.error, from.origin) {
-			(err, _) if err == transfer_failed => Ok(TransferFailed),
-			(err, _) if err == duplicate_contract => Ok(DuplicateContractAddress),
-			(err, _) if err == unsupported_precompile => Err(err),
-			(err, Callee) if err == out_of_gas || err == out_of_deposit => Ok(OutOfResources),
-			(_, Callee) => Ok(CalleeTrapped),
-			(err, _) => Err(err),
-		}
-	}
-
-	fn decode_key(&self, memory: &M, key_ptr: u32, key_len: u32) -> Result<Key, TrapReason> {
+	fn decode_key(&self, memory: &mut M, key_ptr: u32, key_len: u32) -> Result<Key, TrapReason> {
 		let res = match key_len {
 			SENTINEL => {
 				let mut buffer = [0u8; 32];
@@ -508,7 +476,7 @@ impl<'a, E: Ext, M: ?Sized + Memory<E::T>> Runtime<'a, E, M> {
 
 	fn set_storage(
 		&mut self,
-		memory: &M,
+		memory: &mut M,
 		flags: u32,
 		key_ptr: u32,
 		key_len: u32,
@@ -528,8 +496,8 @@ impl<'a, E: Ext, M: ?Sized + Memory<E::T>> Runtime<'a, E, M> {
 			StorageValue::Value(data) => data.len() as u32,
 		};
 
-		let max_size = self.ext.max_value_size();
-		let charged = self.charge_gas(costs(value_len, self.ext.max_value_size()))?;
+		let max_size = limits::STORAGE_BYTES;
+		let charged = self.charge_gas(costs(value_len, max_size))?;
 		if value_len > max_size {
 			return Err(Error::<E::T>::ValueTooLarge.into());
 		}
@@ -553,7 +521,7 @@ impl<'a, E: Ext, M: ?Sized + Memory<E::T>> Runtime<'a, E, M> {
 
 	fn clear_storage(
 		&mut self,
-		memory: &M,
+		memory: &mut M,
 		flags: u32,
 		key_ptr: u32,
 		key_len: u32,
@@ -566,7 +534,7 @@ impl<'a, E: Ext, M: ?Sized + Memory<E::T>> Runtime<'a, E, M> {
 				RuntimeCosts::ClearStorage(len)
 			}
 		};
-		let charged = self.charge_gas(costs(self.ext.max_value_size()))?;
+		let charged = self.charge_gas(costs(limits::STORAGE_BYTES))?;
 		let key = self.decode_key(memory, key_ptr, key_len)?;
 		let outcome = if transient {
 			self.ext.set_transient_storage(&key, None, false)?
@@ -594,7 +562,7 @@ impl<'a, E: Ext, M: ?Sized + Memory<E::T>> Runtime<'a, E, M> {
 				RuntimeCosts::GetStorage(len)
 			}
 		};
-		let charged = self.charge_gas(costs(self.ext.max_value_size()))?;
+		let charged = self.charge_gas(costs(limits::STORAGE_BYTES))?;
 		let key = self.decode_key(memory, key_ptr, key_len)?;
 		let outcome = if transient {
 			self.ext.get_transient_storage(&key)
@@ -651,82 +619,13 @@ impl<'a, E: Ext, M: ?Sized + Memory<E::T>> Runtime<'a, E, M> {
 		}
 	}
 
-	fn contains_storage(
-		&mut self,
-		memory: &M,
-		flags: u32,
-		key_ptr: u32,
-		key_len: u32,
-	) -> Result<u32, TrapReason> {
-		let transient = Self::is_transient(flags)?;
-		let costs = |len| {
-			if transient {
-				RuntimeCosts::ContainsTransientStorage(len)
-			} else {
-				RuntimeCosts::ContainsStorage(len)
-			}
-		};
-		let charged = self.charge_gas(costs(self.ext.max_value_size()))?;
-		let key = self.decode_key(memory, key_ptr, key_len)?;
-		let outcome = if transient {
-			self.ext.get_transient_storage_size(&key)
-		} else {
-			self.ext.get_storage_size(&key)
-		};
-		self.adjust_gas(charged, costs(outcome.unwrap_or(0)));
-		Ok(outcome.unwrap_or(SENTINEL))
-	}
-
-	fn take_storage(
-		&mut self,
-		memory: &mut M,
-		flags: u32,
-		key_ptr: u32,
-		key_len: u32,
-		out_ptr: u32,
-		out_len_ptr: u32,
-	) -> Result<ReturnErrorCode, TrapReason> {
-		let transient = Self::is_transient(flags)?;
-		let costs = |len| {
-			if transient {
-				RuntimeCosts::TakeTransientStorage(len)
-			} else {
-				RuntimeCosts::TakeStorage(len)
-			}
-		};
-		let charged = self.charge_gas(costs(self.ext.max_value_size()))?;
-		let key = self.decode_key(memory, key_ptr, key_len)?;
-		let outcome = if transient {
-			self.ext.set_transient_storage(&key, None, true)?
-		} else {
-			self.ext.set_storage(&key, None, true)?
-		};
-
-		if let crate::storage::WriteOutcome::Taken(value) = outcome {
-			self.adjust_gas(charged, costs(value.len() as u32));
-			self.write_sandbox_output(
-				memory,
-				out_ptr,
-				out_len_ptr,
-				&value,
-				false,
-				already_charged,
-			)?;
-			Ok(ReturnErrorCode::Success)
-		} else {
-			self.adjust_gas(charged, costs(0));
-			Ok(ReturnErrorCode::KeyNotFound)
-		}
-	}
-
 	fn call(
 		&mut self,
 		memory: &mut M,
 		flags: CallFlags,
 		call_type: CallType,
 		callee_ptr: u32,
-		deposit_ptr: u32,
-		weight: Weight,
+		resources: &CallResources<E::T>,
 		input_data_ptr: u32,
 		input_data_len: u32,
 		output_ptr: u32,
@@ -735,13 +634,12 @@ impl<'a, E: Ext, M: ?Sized + Memory<E::T>> Runtime<'a, E, M> {
 		let callee = memory.read_h160(callee_ptr)?;
 		let precompile = <AllPrecompiles<E::T>>::get::<E>(&callee.as_fixed_bytes());
 		match &precompile {
-			Some(precompile) if precompile.has_contract_info() =>
-				self.charge_gas(RuntimeCosts::PrecompileWithInfoBase)?,
+			Some(precompile) if precompile.has_contract_info() => {
+				self.charge_gas(RuntimeCosts::PrecompileWithInfoBase)?
+			},
 			Some(_) => self.charge_gas(RuntimeCosts::PrecompileBase)?,
 			None => self.charge_gas(call_type.cost())?,
 		};
-
-		let deposit_limit = memory.read_u256(deposit_ptr)?;
 
 		// we do check this in exec.rs but we want to error out early
 		if input_data_len > limits::CALLDATA_BYTES {
@@ -780,21 +678,20 @@ impl<'a, E: Ext, M: ?Sized + Memory<E::T>> Runtime<'a, E, M> {
 						dust_transfer: Pallet::<E::T>::has_dust(value),
 					})?;
 				}
-				self.ext.call(
-					weight,
-					deposit_limit,
-					&callee,
-					value,
-					input_data,
-					flags.contains(CallFlags::ALLOW_REENTRY),
-					read_only,
-				)
+
+				let reentrancy = if flags.contains(CallFlags::ALLOW_REENTRY) {
+					ReentrancyProtection::AllowReentry
+				} else {
+					ReentrancyProtection::Strict
+				};
+
+				self.ext.call(resources, &callee, value, input_data, reentrancy, read_only)
 			},
 			CallType::DelegateCall => {
 				if flags.intersects(CallFlags::ALLOW_REENTRY | CallFlags::READ_ONLY) {
 					return Err(Error::<E::T>::InvalidCallFlags.into());
 				}
-				self.ext.delegate_call(weight, deposit_limit, callee, input_data)
+				self.ext.delegate_call(resources, callee, input_data)
 			},
 		};
 
@@ -823,7 +720,7 @@ impl<'a, E: Ext, M: ?Sized + Memory<E::T>> Runtime<'a, E, M> {
 				Ok(self.ext.last_frame_output().into())
 			},
 			Err(err) => {
-				let error_code = Self::exec_error_into_return_code(err)?;
+				let error_code = super::exec_error_into_return_code::<E>(err)?;
 				memory.write(output_len_ptr, &0u32.to_le_bytes())?;
 				Ok(error_code)
 			},
@@ -878,9 +775,8 @@ impl<'a, E: Ext, M: ?Sized + Memory<E::T>> Runtime<'a, E, M> {
 		memory.reset_interpreter_cache();
 
 		match self.ext.instantiate(
-			weight,
-			deposit_limit,
-			code_hash,
+			&CallResources::from_weight_and_deposit(weight, deposit_limit),
+			Code::Existing(code_hash),
 			value,
 			input_data,
 			salt.as_ref(),
@@ -908,8 +804,23 @@ impl<'a, E: Ext, M: ?Sized + Memory<E::T>> Runtime<'a, E, M> {
 				write_result?;
 				Ok(self.ext.last_frame_output().into())
 			},
-			Err(err) => Ok(Self::exec_error_into_return_code(err)?),
+			Err(err) => Ok(super::exec_error_into_return_code::<E>(err)?),
 		}
+	}
+}
+
+impl<'a, E: Ext, M: ?Sized + Memory<E::T>> FrameTraceInfo for Runtime<'a, E, M> {
+	fn gas_left(&self) -> u64 {
+		let meter = self.ext.frame_meter();
+		meter.eth_gas_left().unwrap_or_default().try_into().unwrap_or_default()
+	}
+	fn weight_consumed(&self) -> Weight {
+		let meter = self.ext.frame_meter();
+		meter.weight_consumed()
+	}
+
+	fn last_frame_output(&self) -> crate::evm::Bytes {
+		crate::evm::Bytes(self.ext.last_frame_output().data.clone())
 	}
 }
 
@@ -919,21 +830,23 @@ pub struct PreparedCall<'a, E: Ext> {
 	runtime: Runtime<'a, E, polkavm::RawInstance>,
 }
 
-impl<'a, E: Ext> PreparedCall<'a, E>
-where
-	BalanceOf<E::T>: Into<U256>,
-	BalanceOf<E::T>: TryFrom<U256>,
-{
+impl<'a, E: Ext> PreparedCall<'a, E> {
 	pub fn call(mut self) -> ExecResult {
 		let exec_result = loop {
 			let interrupt = self.instance.run();
 			if let Some(exec_result) =
 				self.runtime.handle_interrupt(interrupt, &self.module, &mut self.instance)
 			{
-				break exec_result
+				break exec_result;
 			}
 		};
-		let _ = self.runtime.ext().gas_meter_mut().sync_from_executor(self.instance.gas())?;
+		crate::tracing::if_tracing(|tracer| {
+			tracer.enter_ecall(crate::tracing::PVM_FUEL_NAME, &[], &self.runtime)
+		});
+		let sync_result =
+			self.runtime.ext().frame_meter_mut().sync_from_executor(self.instance.gas());
+		crate::tracing::if_tracing(|tracer| tracer.exit_step(&self.runtime, None));
+		sync_result?;
 		exec_result
 	}
 
