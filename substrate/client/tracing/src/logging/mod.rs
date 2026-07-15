@@ -238,6 +238,16 @@ pub struct LoggerBuilder {
 impl LoggerBuilder {
 	/// Create a new [`LoggerBuilder`] which can be used to initialize the global logger.
 	pub fn new<S: Into<String>>(directives: S) -> Self {
+		let otel = OtelParams {
+            endpoint_traces: Default::default(),
+            endpoint_metrics: Default::default(),
+            endpoint_logs: Default::default(),
+            service_name: Default::default(),
+            service_version: Default::default(),
+            resource_attributes: Vec::new(),
+            metric_temporality: internal_utils::Temporality::Delta,
+        };
+
 		Self {
 			directives: directives.into(),
 			profiling: None,
@@ -245,7 +255,7 @@ impl LoggerBuilder {
 			log_reloading: false,
 			force_colors: None,
 			detailed_output: false,
-			otel: OtelParams::default(),
+			otel,
 		}
 	}
 
