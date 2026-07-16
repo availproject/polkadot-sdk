@@ -5125,7 +5125,7 @@ dependencies = [
  "frame-support",
  "frame-system",
  "futures",
- "hashbrown 0.15.5",
+ "hashbrown 0.17.1",
  "hex-literal 1.1.0",
  "impl-trait-for-tuples",
  "log",
@@ -7296,7 +7296,7 @@ dependencies = [
  "frame-system",
  "gethostname",
  "handlebars",
- "itertools 0.11.0",
+ "itertools 0.14.0",
  "linked-hash-map",
  "log",
  "parity-scale-codec",
@@ -7677,7 +7677,7 @@ dependencies = [
  "frame-support",
  "frame-support-procedural-tools",
  "frame-system",
- "itertools 0.11.0",
+ "itertools 0.14.0",
  "macro_magic",
  "parity-scale-codec",
  "pretty_assertions",
@@ -8482,6 +8482,8 @@ version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 dependencies = [
+ "allocator-api2",
+ "equivalent",
  "foldhash 0.2.0",
  "serde",
  "serde_core",
@@ -11710,7 +11712,7 @@ dependencies = [
  "flate2",
  "fs_extra",
  "glob",
- "itertools 0.11.0",
+ "itertools 0.14.0",
  "tar",
  "tempfile",
  "toml_edit 0.19.15",
@@ -13789,7 +13791,7 @@ dependencies = [
 name = "pallet-mmr"
 version = "49.0.0"
 dependencies = [
- "itertools 0.11.0",
+ "itertools 0.14.0",
  "log",
  "parity-scale-codec",
  "polkadot-sdk-frame",
@@ -14283,7 +14285,7 @@ dependencies = [
  "hex-literal 1.1.0",
  "humantime-serde",
  "impl-trait-for-tuples",
- "itertools 0.11.0",
+ "itertools 0.14.0",
  "k256",
  "log",
  "num-bigint",
@@ -15027,7 +15029,7 @@ dependencies = [
  "substrate-state-trie-migration-rpc",
  "thousands",
  "tokio",
- "zstd 0.12.4",
+ "zstd 0.13.3",
 ]
 
 [[package]]
@@ -16132,7 +16134,7 @@ dependencies = [
  "assert_matches",
  "futures",
  "futures-timer",
- "itertools 0.11.0",
+ "itertools 0.14.0",
  "polkadot-node-metrics",
  "polkadot-node-network-protocol",
  "polkadot-node-primitives",
@@ -16285,7 +16287,7 @@ dependencies = [
  "fatality",
  "futures",
  "futures-timer",
- "itertools 0.11.0",
+ "itertools 0.14.0",
  "kvdb-memorydb",
  "parity-scale-codec",
  "polkadot-node-clock",
@@ -16478,7 +16480,7 @@ dependencies = [
  "derive_more 0.99.20",
  "futures",
  "futures-timer",
- "itertools 0.11.0",
+ "itertools 0.14.0",
  "kvdb-memorydb",
  "merlin",
  "parity-scale-codec",
@@ -16517,7 +16519,7 @@ dependencies = [
  "assert_matches",
  "async-trait",
  "futures",
- "itertools 0.11.0",
+ "itertools 0.14.0",
  "kvdb-memorydb",
  "polkadot-approval-distribution",
  "polkadot-node-core-approval-voting",
@@ -16988,7 +16990,7 @@ dependencies = [
  "sp-keystore 0.49.0",
  "sp-maybe-compressed-blob 11.0.0",
  "thiserror 1.0.69",
- "zstd 0.12.4",
+ "zstd 0.13.3",
 ]
 
 [[package]]
@@ -17054,7 +17056,7 @@ dependencies = [
  "assert_matches",
  "fatality",
  "futures",
- "itertools 0.11.0",
+ "itertools 0.14.0",
  "kvdb",
  "kvdb-shared-tests",
  "parity-db",
@@ -18199,7 +18201,7 @@ dependencies = [
  "colored",
  "futures",
  "hex",
- "itertools 0.11.0",
+ "itertools 0.14.0",
  "kvdb-memorydb",
  "orchestra",
  "parity-scale-codec",
@@ -20922,7 +20924,7 @@ dependencies = [
  "fdlimit",
  "futures",
  "futures-timer",
- "itertools 0.11.0",
+ "itertools 0.14.0",
  "libp2p-identity",
  "log",
  "names",
@@ -22137,7 +22139,7 @@ dependencies = [
  "futures",
  "futures-util",
  "hex",
- "itertools 0.11.0",
+ "itertools 0.14.0",
  "jsonrpsee",
  "log",
  "multihash-codetable",
@@ -22324,7 +22326,7 @@ dependencies = [
  "async-channel 1.9.0",
  "criterion",
  "futures",
- "itertools 0.11.0",
+ "itertools 0.14.0",
  "log",
  "parity-db",
  "parking_lot 0.12.5",
@@ -22490,7 +22492,7 @@ dependencies = [
  "futures",
  "futures-timer",
  "indexmap 2.14.0",
- "itertools 0.11.0",
+ "itertools 0.14.0",
  "linked-hash-map",
  "parity-scale-codec",
  "parking_lot 0.12.5",
@@ -24981,7 +24983,7 @@ dependencies = [
  "hash-db",
  "hash256-std-hasher",
  "impl-serde",
- "itertools 0.11.0",
+ "itertools 0.14.0",
  "k256",
  "libsecp256k1",
  "log",
@@ -25383,7 +25385,7 @@ name = "sp-maybe-compressed-blob"
 version = "11.0.0"
 dependencies = [
  "thiserror 1.0.69",
- "zstd 0.12.4",
+ "zstd 0.13.3",
 ]
 
 [[package]]
@@ -25540,7 +25542,7 @@ dependencies = [
  "substrate-test-runtime-client",
  "tracing",
  "tuplex",
- "zstd 0.12.4",
+ "zstd 0.13.3",
 ]
 
 [[package]]
@@ -25899,7 +25901,7 @@ dependencies = [
  "criterion",
  "foldhash 0.1.5",
  "hash-db",
- "hashbrown 0.15.5",
+ "hashbrown 0.17.1",
  "memory-db",
  "nohash-hasher",
  "parity-scale-codec",
