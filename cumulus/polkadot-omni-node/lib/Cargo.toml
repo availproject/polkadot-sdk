@@ -115,7 +115,7 @@ sc-consensus-aura = { workspace = true }
 assert_cmd = { workspace = true }
 cumulus-test-runtime = { workspace = true }
 nix = { features = ["signal"], workspace = true }
-tokio = { version = "1.43.1", features = ["macros", "parking_lot", "time"] }
+tokio = { version = "1.52.3", features = ["macros", "parking_lot", "time"] }
 wait-timeout = { workspace = true }
 
 [features]
