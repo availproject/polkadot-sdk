@@ -21,7 +21,7 @@ use std::{
 
 use polkadot_node_subsystem::prometheus::prometheus::HistogramTimer;
 use polkadot_node_subsystem_util::metrics::{self, prometheus};
-use polkadot_primitives::{vstaging::CandidateReceiptV2 as CandidateReceipt, BlockNumber, Hash};
+use polkadot_primitives::{BlockNumber, CandidateReceiptV2 as CandidateReceipt, Hash};
 use sp_core::H256;
 
 use super::collation::CollationStatus;
@@ -172,7 +172,8 @@ impl metrics::Metrics for Metrics {
 						"How much time collations spend waiting to be fetched",
 					)
 					.buckets(vec![
-						0.001, 0.01, 0.025, 0.05, 0.1, 0.15, 0.25, 0.35, 0.5, 0.75, 1.0, 2.0, 5.0,
+						0.25, 0.35, 0.5, 0.75, 1.0, 2.0, 5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0,
+						60.0,
 					]),
 				)?,
 				registry,
@@ -215,7 +216,9 @@ impl metrics::Metrics for Metrics {
 						"polkadot_parachain_collation_expired",
 						"How many collations expired (not backed or not included)",
 					)
-					.buckets(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]),
+					.buckets(vec![
+						1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 15.0, 20.0, 25.0, 30.0,
+					]),
 					&["state"],
 				)?,
 				registry,
@@ -264,7 +267,7 @@ impl CollationTracker {
 				?head,
 				"Collation already backed in a fork, skipping",
 			);
-			return
+			return;
 		}
 
 		entry.set_backed_at(block_number);
@@ -295,22 +298,30 @@ impl CollationTracker {
 		receipt: CandidateReceipt,
 	) {
 		let head = receipt.descriptor.para_head();
+		let para_id = receipt.descriptor.para_id();
 		let Some(entry) = self.entries.get_mut(&head) else {
 			gum::debug!(
 				target: crate::LOG_TARGET_STATS,
+				?para_id,
 				?head,
 				"Included collation not found in tracker",
 			);
 			return;
 		};
 
+		let pov_hash = entry.pov_hash();
+		let candidate_hash = entry.candidate_hash();
+
 		if entry.included().is_some() {
 			gum::debug!(
 				target: crate::LOG_TARGET_STATS,
+				?para_id,
 				?head,
+				?candidate_hash,
+				?pov_hash,
 				"Collation already included in a fork, skipping",
 			);
-			return
+			return;
 		}
 
 		entry.set_included_at(block_number);
@@ -320,8 +331,10 @@ impl CollationTracker {
 				?latency,
 				relay_block = ?leaf,
 				relay_parent = ?entry.relay_parent,
-				para_id = ?receipt.descriptor.para_id(),
-				head = ?receipt.descriptor.para_head(),
+				?para_id,
+				?head,
+				?candidate_hash,
+				?pov_hash,
 				"Collation included on relay chain",
 			);
 		}
@@ -412,28 +425,37 @@ pub(crate) struct CollationStats {
 	/// The collation backing latency (seconds). Duration since collation fetched
 	/// until the import of a relay chain block where collation is backed.
 	backed_latency_metric: Option<HistogramTimer>,
+	/// The Collation candidate hash
+	candidate_hash: Hash,
+	/// The Collation PoV hash
+	pov_hash: Hash,
 }
 
 impl CollationStats {
 	/// Create new empty instance.
 	pub fn new(
+		clock: &dyn polkadot_node_clock::Clock,
 		head: Hash,
 		relay_parent_number: BlockNumber,
 		relay_parent: Hash,
 		metrics: &Metrics,
+		candidate_hash: Hash,
+		pov_hash: Hash,
 	) -> Self {
 		Self {
 			pre_backing_status: CollationStatus::Created,
 			head,
 			relay_parent_number,
 			relay_parent,
-			advertised_at: std::time::Instant::now(),
+			advertised_at: clock.now(),
 			backed_at: None,
 			expired_at: None,
 			fetched_at: None,
 			included_at: None,
 			fetch_latency_metric: metrics.time_collation_fetch_latency(),
 			backed_latency_metric: None,
+			candidate_hash,
+			pov_hash,
 		}
 	}
 
@@ -470,6 +492,16 @@ impl CollationStats {
 	/// Get parachain block header hash.
 	pub fn head(&self) -> H256 {
 		self.head
+	}
+
+	/// Get candidate hash.
+	pub fn candidate_hash(&self) -> H256 {
+		self.candidate_hash
+	}
+
+	/// Get candidate PoV hash.
+	pub fn pov_hash(&self) -> H256 {
+		self.pov_hash
 	}
 
 	/// Set the timestamp at which collation is fetched.
@@ -544,7 +576,7 @@ impl CollationStats {
 	pub fn is_tracking_expired(&self, current_block: BlockNumber) -> bool {
 		// Don't expire included collations
 		if self.included().is_some() {
-			return false
+			return false;
 		}
 		let expiry_block = self.relay_parent_number + self.tracking_ttl();
 		expiry_block <= current_block

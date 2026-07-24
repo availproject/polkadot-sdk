@@ -21,9 +21,9 @@ use chrono::prelude::*;
 use futures::{future::FutureExt, Future};
 use log::info;
 use sc_service::{Configuration, Error as ServiceError, TaskManager};
+use sc_tracing::logging::OtelGuards;
 use sc_utils::metrics::{TOKIO_THREADS_ALIVE, TOKIO_THREADS_TOTAL};
 use std::{marker::PhantomData, time::Duration};
-use sc_tracing::logging::OtelGuards;
 
 /// Build a tokio runtime with all features.
 pub fn build_runtime() -> std::result::Result<tokio::runtime::Runtime, std::io::Error> {
@@ -44,7 +44,7 @@ pub struct Runner<C: SubstrateCli> {
 	config: Configuration,
 	tokio_runtime: tokio::runtime::Runtime,
 	signals: Signals,
-	otel_guards: OtelGuards,
+	_otel_guards: OtelGuards,
 	phantom: PhantomData<C>,
 }
 
@@ -56,7 +56,13 @@ impl<C: SubstrateCli> Runner<C> {
 		signals: Signals,
 		otel_guards: OtelGuards,
 	) -> Result<Runner<C>> {
-		Ok(Runner { config, tokio_runtime, signals, otel_guards, phantom: PhantomData })
+		Ok(Runner {
+			config,
+			tokio_runtime,
+			signals,
+			_otel_guards: otel_guards,
+			phantom: PhantomData,
+		})
 	}
 
 	/// Log information about the node itself.
@@ -286,6 +292,7 @@ mod tests {
 					rate_limit: None,
 					rate_limit_whitelisted_ips: Default::default(),
 					rate_limit_trust_proxy_headers: Default::default(),
+					request_logger_limit: 1024,
 				},
 				prometheus_config: None,
 				telemetry_endpoints: None,

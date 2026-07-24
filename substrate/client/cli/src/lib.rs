@@ -222,9 +222,10 @@ pub trait SubstrateCli: Sized {
 
 		let config = command.create_configuration(self, tokio_runtime.handle().clone())?;
 
-		let otel_guards = command.init(&Self::support_url(), &Self::impl_version(), |logger_builder| {
-			logger_hook(logger_builder, &config)
-		})?;
+		let otel_guards =
+			command.init(&Self::support_url(), &Self::impl_version(), |logger_builder| {
+				logger_hook(logger_builder, &config)
+			})?;
 
 		Runner::new(config, tokio_runtime, signals, otel_guards)
 	}

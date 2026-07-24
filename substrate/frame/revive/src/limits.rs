@@ -48,8 +48,22 @@ pub const CALL_STACK_DEPTH: u32 = 25;
 /// We set it to the same limit that ethereum has. It is unlikely to change.
 pub const NUM_EVENT_TOPICS: u32 = 4;
 
-/// Maximum size of events (including topics) and storage values.
-pub const PAYLOAD_BYTES: u32 = 416;
+/// Maximum size of of the transaction payload
+///
+/// Maximum code size during instantiation taken into account plus some overhead.
+pub const MAX_TRANSACTION_PAYLOAD_SIZE: u32 = code::BLOB_BYTES + CALLDATA_BYTES;
+
+/// Maximum size of storage items.
+pub const STORAGE_BYTES: u32 = 416;
+
+/// Maximum payload size of events.
+pub const EVENT_BYTES: u32 = 64 * 1024;
+
+/// The extra ref time charge of deposit event per byte.
+///
+/// This ensure the block builder has enough memory and pallet storage
+/// to operate under worst case scenarios.
+pub const EXTRA_EVENT_CHARGE_PER_BYTE: u64 = 256 * 1024;
 
 /// The maximum size for calldata and return data.
 ///
@@ -72,6 +86,12 @@ pub const PAGE_SIZE: u32 = 4 * 1024;
 /// The current limit of 4kb allows storing up 16 U256 immutable variables.
 /// Which should always be enough because Solidity allows for 16 local (stack) variables.
 pub const IMMUTABLE_BYTES: u32 = 4 * 1024;
+
+/// upperbound of memory that can be used by the EVM interpreter.
+pub const EVM_MEMORY_BYTES: u32 = 1024 * 1024;
+
+/// EVM interpreter stack limit.
+pub const EVM_STACK_LIMIT: u32 = 1024;
 
 /// Limits that are only enforced on code upload.
 ///
@@ -118,19 +138,20 @@ pub mod code {
 		pvm_blob: Vec<u8>,
 		available_syscalls: &[&[u8]],
 	) -> Result<Vec<u8>, DispatchError> {
-		use polkavm::program::ISA64_V1 as ISA;
-		use polkavm_common::program::EstimateInterpreterMemoryUsageArgs;
+		use polkavm_common::program::{
+			EstimateInterpreterMemoryUsageArgs, ISA_ReviveV1, InstructionSetKind,
+		};
 
 		let len: u64 = pvm_blob.len() as u64;
 		if len > crate::limits::code::BLOB_BYTES.into() {
 			log::debug!(target: LOG_TARGET, "contract blob too large: {len} limit: {BLOB_BYTES}");
-			return Err(<Error<T>>::BlobTooLarge.into())
+			return Err(<Error<T>>::BlobTooLarge.into());
 		}
 
 		#[cfg(feature = "std")]
 		if std::env::var_os("REVIVE_SKIP_VALIDATION").is_some() {
 			log::warn!(target: LOG_TARGET, "Skipping validation because env var REVIVE_SKIP_VALIDATION is set");
-			return Ok(pvm_blob)
+			return Ok(pvm_blob);
 		}
 
 		let program = polkavm::ProgramBlob::parse(pvm_blob.as_slice().into()).map_err(|err| {
@@ -140,6 +161,11 @@ pub mod code {
 
 		if !program.is_64_bit() {
 			log::debug!(target: LOG_TARGET, "32bit programs are not supported.");
+			Err(Error::<T>::CodeRejected)?;
+		}
+
+		if program.isa() != InstructionSetKind::ReviveV1 {
+			log::debug!(target: LOG_TARGET, "Program instruction set '{}' is not '{}'", program.isa().name(), InstructionSetKind::ReviveV1.name());
 			Err(Error::<T>::CodeRejected)?;
 		}
 
@@ -170,7 +196,7 @@ pub mod code {
 		let mut block_size: u32 = 0;
 		let mut basic_block_count: u32 = 0;
 		let mut instruction_count: u32 = 0;
-		for inst in program.instructions(ISA) {
+		for inst in program.instructions_with_isa(ISA_ReviveV1) {
 			use polkavm::program::Instruction;
 			block_size += 1;
 			instruction_count += 1;
@@ -182,11 +208,13 @@ pub mod code {
 			match inst.kind {
 				Instruction::invalid => {
 					log::debug!(target: LOG_TARGET, "invalid instruction at offset {}", inst.offset);
-					return Err(<Error<T>>::InvalidInstruction.into())
+					return Err(<Error<T>>::InvalidInstruction.into());
 				},
+				// Since polkavm `0.30.0` linker will fail if it detects sbrk instruction.
+				// So this branch is never reached for programs built with polkavm >= 0.30.0.
 				Instruction::sbrk(_, _) => {
 					log::debug!(target: LOG_TARGET, "sbrk instruction is not allowed. offset {}", inst.offset);
-					return Err(<Error<T>>::InvalidInstruction.into())
+					return Err(<Error<T>>::InvalidInstruction.into());
 				},
 				// Only benchmarking code is allowed to circumvent the import table. We might want
 				// to remove this magic syscall number later. Hence we need to prevent contracts
@@ -194,7 +222,7 @@ pub mod code {
 				#[cfg(not(feature = "runtime-benchmarks"))]
 				Instruction::ecalli(idx) if idx == crate::SENTINEL => {
 					log::debug!(target: LOG_TARGET, "reserved syscall idx {idx}. offset {}", inst.offset);
-					return Err(<Error<T>>::InvalidInstruction.into())
+					return Err(<Error<T>>::InvalidInstruction.into());
 				},
 				_ => (),
 			}
@@ -203,7 +231,7 @@ pub mod code {
 
 		if max_block_size > BASIC_BLOCK_SIZE {
 			log::debug!(target: LOG_TARGET, "basic block too large: {max_block_size} limit: {BASIC_BLOCK_SIZE}");
-			return Err(Error::<T>::BasicBlockTooLarge.into())
+			return Err(Error::<T>::BasicBlockTooLarge.into());
 		}
 
 		let usage_args = EstimateInterpreterMemoryUsageArgs::BoundedCache {
@@ -220,7 +248,7 @@ pub mod code {
 				Error::<T>::CodeRejected
 			})?;
 
-		log::debug!(
+		log::trace!(
 			target: LOG_TARGET, "Contract memory usage: purgable={}/{} KB baseline={}/{}",
 			program_info.purgeable_ram_consumption, PURGABLE_MEMORY_LIMIT,
 			program_info.baseline_ram_consumption, BASELINE_MEMORY_LIMIT,
@@ -231,7 +259,7 @@ pub mod code {
 				program_info.purgeable_ram_consumption,
 				PURGABLE_MEMORY_LIMIT,
 			);
-			return Err(Error::<T>::StaticMemoryTooLarge.into())
+			return Err(Error::<T>::StaticMemoryTooLarge.into());
 		}
 
 		if program_info.baseline_ram_consumption > BASELINE_MEMORY_LIMIT {
@@ -239,7 +267,7 @@ pub mod code {
 				program_info.baseline_ram_consumption,
 				BASELINE_MEMORY_LIMIT,
 			);
-			return Err(Error::<T>::StaticMemoryTooLarge.into())
+			return Err(Error::<T>::StaticMemoryTooLarge.into());
 		}
 
 		Ok(pvm_blob)
@@ -254,7 +282,14 @@ const fn memory_required() -> u32 {
 	let max_call_depth = CALL_STACK_DEPTH + 1;
 
 	let per_stack_memory = code::PURGABLE_MEMORY_LIMIT + TRANSIENT_STORAGE_BYTES * 2;
-	let per_frame_memory = code::BASELINE_MEMORY_LIMIT + CALLDATA_BYTES * 2;
+
+	let evm_max_initcode_size = revm::primitives::eip3860::MAX_INITCODE_SIZE as u32;
+	let evm_overhead = EVM_MEMORY_BYTES + evm_max_initcode_size + EVM_STACK_LIMIT * 32;
+	let per_frame_memory = if code::BASELINE_MEMORY_LIMIT > evm_overhead {
+		code::BASELINE_MEMORY_LIMIT
+	} else {
+		evm_overhead
+	} + CALLDATA_BYTES * 2;
 
 	per_stack_memory + max_call_depth * per_frame_memory
 }

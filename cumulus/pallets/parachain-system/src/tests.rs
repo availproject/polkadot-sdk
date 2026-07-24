@@ -19,8 +19,12 @@
 use super::*;
 use crate::mock::*;
 
+use alloc::collections::BTreeMap;
 use core::num::NonZeroU32;
-use cumulus_primitives_core::{AbridgedHrmpChannel, InboundDownwardMessage, InboundHrmpMessage};
+use cumulus_primitives_core::{
+	relay_chain::ApprovedPeerId, AbridgedHrmpChannel, ClaimQueueOffset, CoreInfo, CoreSelector,
+	InboundDownwardMessage, InboundHrmpMessage, CUMULUS_CONSENSUS_ID,
+};
 use cumulus_primitives_parachain_inherent::{
 	v0, INHERENT_IDENTIFIER, PARACHAIN_INHERENT_IDENTIFIER_V0,
 };
@@ -31,6 +35,7 @@ use rand::Rng;
 use relay_chain::HrmpChannelId;
 use sp_core::H256;
 use sp_inherents::InherentDataProvider;
+use sp_runtime::DigestItem;
 use sp_trie::StorageProof;
 
 #[test]
@@ -180,7 +185,7 @@ fn unincluded_segment_works() {
 }
 
 #[test]
-#[should_panic = "no space left for the block in the unincluded segment"]
+#[should_panic = "No space left for the block in the unincluded segment: new_len(1) < capacity(1)"]
 fn unincluded_segment_is_limited() {
 	CONSENSUS_HOOK.with(|c| {
 		*c.borrow_mut() = Box::new(|_| (Weight::zero(), NonZeroU32::new(1).unwrap().into()))
@@ -410,8 +415,9 @@ fn inherent_messages_are_compressed() {
 				sproof.dmq_mqc_head = Some(dmp_mqc.head());
 
 				for (sender, msg) in &hrmp_msgs_clone {
-					let mqc_head =
-						sproof.upsert_inbound_channel(*sender).mqc_head.get_or_insert_default();
+					let channel = sproof.upsert_inbound_channel(*sender);
+					channel.max_message_size = 100 * 1024;
+					let mqc_head = channel.mqc_head.get_or_insert_default();
 					let mut mqc = MessageQueueChain::new(*mqc_head);
 					mqc.extend_hrmp(msg);
 					*mqc_head = mqc.head();
@@ -866,7 +872,7 @@ fn hrmp_outbound_respects_used_bandwidth() {
 fn runtime_upgrade_events() {
 	BlockTests::new()
 		.with_relay_sproof_builder(|_, block_number, builder| {
-			if block_number > 1 {
+			if block_number == 2 {
 				builder.upgrade_go_ahead = Some(relay_chain::UpgradeGoAhead::GoAhead);
 			}
 		})
@@ -889,8 +895,12 @@ fn runtime_upgrade_events() {
 			|| {
 				let events = System::events();
 
-				assert_eq!(events[0].event, RuntimeEvent::System(frame_system::Event::CodeUpdated));
-
+				// system_version 1: update_code_in_storage writes :code directly,
+				// emitting both the digest and CodeUpdated event in the same block.
+				assert!(matches!(
+					events[0].event,
+					RuntimeEvent::System(frame_system::Event::CodeUpdated { .. })
+				));
 				assert_eq!(
 					events[1].event,
 					RuntimeEvent::ParachainSystem(crate::Event::ValidationFunctionApplied {
@@ -1015,7 +1025,7 @@ fn send_upward_message_num_per_candidate() {
 			2,
 			|| {
 				assert_eq!(UnincludedSegment::<Test>::get().len(), 0);
-				/* do nothing within block */
+				// do nothing within block
 			},
 			|| {
 				let v = UpwardMessages::<Test>::get();
@@ -1090,7 +1100,6 @@ fn send_upward_message_check_size() {
 fn send_hrmp_message_buffer_channel_close() {
 	BlockTests::new()
 		.with_relay_sproof_builder(|_, relay_block_num, sproof| {
-			//
 			// Base case setup
 			//
 			sproof.para_id = ParaId::from(200);
@@ -1118,7 +1127,6 @@ fn send_hrmp_message_buffer_channel_close() {
 				},
 			);
 
-			//
 			// Adjustment according to block
 			//
 			match relay_block_num {
@@ -1417,6 +1425,100 @@ fn receive_hrmp() {
 		.add(3, || {});
 }
 
+// A channel that was force removed from RC state will clean up any remaining state.
+#[test]
+fn receive_hrmp_channel_suddenly_removed_from_relay_state() {
+	BlockTests::new()
+		.with_relay_sproof_builder(|_, relay_block_num, sproof| match relay_block_num {
+			1 => {
+				// 300 - one new message
+				sproof.upsert_inbound_channel(ParaId::from(300)).mqc_head =
+					Some(MessageQueueChain::default().extend_hrmp(&mk_hrmp(1, 1)).head());
+			},
+			2 => {
+				// 300 - is gone, this should trigger the cleanup
+			},
+			_ => unreachable!(),
+		})
+		.with_inherent_data(|_, relay_block_num, data| match relay_block_num {
+			1 => {
+				data.horizontal_messages.insert(ParaId::from(300), vec![mk_hrmp(1, 1)]);
+			},
+			2 => {},
+			_ => unreachable!(),
+		})
+		.add(1, || {
+			HANDLED_XCMP_MESSAGES.with(|m| {
+				let mut m = m.borrow_mut();
+				assert_eq!(&*m, &[(ParaId::from(300), 1, vec![1])], "Received on channel 300");
+				m.clear();
+			});
+			assert!(
+				LastHrmpMqcHeads::<Test>::get().contains_key(&ParaId::from(300)),
+				"Channel 300 should be present"
+			);
+		})
+		.add(2, || {
+			assert_eq!(
+				LastHrmpMqcHeads::<Test>::get().into_keys().collect::<Vec<_>>(),
+				vec![],
+				"Channel 300 should be removed"
+			);
+		});
+}
+
+// Same as above but other code path since another channel contains a message.
+#[test]
+fn receive_hrmp_channel_suddenly_removed_from_relay_state2() {
+	BlockTests::new()
+		.with_relay_sproof_builder(|_, relay_block_num, sproof| match relay_block_num {
+			1 => {
+				// 200 - one new message
+				sproof.upsert_inbound_channel(ParaId::from(200)).mqc_head =
+					Some(MessageQueueChain::default().extend_hrmp(&mk_hrmp(1, 1)).head());
+				// 300 - one new message
+				sproof.upsert_inbound_channel(ParaId::from(300)).mqc_head =
+					Some(MessageQueueChain::default().extend_hrmp(&mk_hrmp(1, 1)).head());
+			},
+			2 => {
+				// 200 - no new messages, mqc stayed the same.
+				sproof.upsert_inbound_channel(ParaId::from(200)).mqc_head =
+					Some(MessageQueueChain::default().extend_hrmp(&mk_hrmp(1, 1)).head());
+				// 300 - is gone, this should trigger the cleanup
+			},
+			_ => unreachable!(),
+		})
+		.with_inherent_data(|_, relay_block_num, data| match relay_block_num {
+			1 => {
+				data.horizontal_messages.insert(ParaId::from(200), vec![mk_hrmp(1, 1)]);
+				data.horizontal_messages.insert(ParaId::from(300), vec![mk_hrmp(1, 1)]);
+			},
+			2 => {},
+			_ => unreachable!(),
+		})
+		.add(1, || {
+			HANDLED_XCMP_MESSAGES.with(|m| {
+				let mut m = m.borrow_mut();
+				assert_eq!(
+					&*m,
+					&[(ParaId::from(200), 1, vec![1]), (ParaId::from(300), 1, vec![1])]
+				);
+				m.clear();
+			});
+			assert!(
+				LastHrmpMqcHeads::<Test>::get().contains_key(&ParaId::from(300)),
+				"Channel 300 should be present"
+			);
+		})
+		.add(2, || {
+			assert_eq!(
+				LastHrmpMqcHeads::<Test>::get().into_keys().collect::<Vec<_>>(),
+				vec![ParaId::from(200)],
+				"Channel 300 should be removed but 200 should be present",
+			);
+		});
+}
+
 #[test]
 fn receive_hrmp_empty_channel() {
 	BlockTests::new()
@@ -1548,6 +1650,7 @@ fn receive_hrmp_many() {
 }
 
 #[test]
+#[cfg(not(feature = "runtime-benchmarks"))]
 fn upgrade_version_checks_should_work() {
 	use codec::Encode;
 	use sp_version::RuntimeVersion;
@@ -1654,4 +1757,75 @@ fn ump_fee_factor_increases_and_decreases() {
 				assert_eq!(UpwardDeliveryFeeFactor::<Test>::get(), FixedU128::from_u32(1));
 			},
 		);
+}
+
+#[test]
+fn ump_signals_are_sent_correctly() {
+	let core_info = CoreInfo {
+		selector: CoreSelector(1),
+		claim_queue_offset: ClaimQueueOffset(1),
+		number_of_cores: codec::Compact(1),
+	};
+
+	// Test cases list with the following format:
+	// `((expect_approved_peer, expect_select_core), expected_upward_messages)`
+	let test_cases = BTreeMap::from([
+		((false, false), vec![b"Test".to_vec()]),
+		(
+			(true, false),
+			vec![
+				b"Test".to_vec(),
+				UMP_SEPARATOR,
+				UMPSignal::ApprovedPeer(ApprovedPeerId::try_from(b"12345".to_vec()).unwrap())
+					.encode(),
+			],
+		),
+		(
+			(false, true),
+			vec![
+				b"Test".to_vec(),
+				UMP_SEPARATOR,
+				UMPSignal::SelectCore(core_info.selector, core_info.claim_queue_offset).encode(),
+			],
+		),
+		(
+			(true, true),
+			vec![
+				b"Test".to_vec(),
+				UMP_SEPARATOR,
+				UMPSignal::SelectCore(core_info.selector, core_info.claim_queue_offset).encode(),
+				UMPSignal::ApprovedPeer(ApprovedPeerId::try_from(b"12345".to_vec()).unwrap())
+					.encode(),
+			],
+		),
+	]);
+
+	for ((expect_approved_peer, expect_select_core), expected_upward_messages) in test_cases {
+		let core_info_digest = CumulusDigestItem::CoreInfo(core_info.clone()).encode();
+
+		BlockTests::new()
+			.with_inherent_data(move |_, _, data| {
+				if expect_approved_peer {
+					data.collator_peer_id =
+						Some(ApprovedPeerId::try_from(b"12345".to_vec()).unwrap());
+				}
+			})
+			.add_with_post_test(
+				1,
+				move || {
+					ParachainSystem::send_upward_message(b"Test".to_vec()).unwrap();
+
+					if expect_select_core {
+						System::deposit_log(DigestItem::PreRuntime(
+							CUMULUS_CONSENSUS_ID,
+							core_info_digest.clone(),
+						));
+					}
+				},
+				move || {
+					assert_eq!(PendingUpwardSignals::<Test>::get(), Vec::<Vec<u8>>::new());
+					assert_eq!(UpwardMessages::<Test>::get(), expected_upward_messages);
+				},
+			);
+	}
 }

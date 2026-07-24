@@ -23,6 +23,11 @@ use xcm::{
 };
 use xcm_executor::AssetsInHolding;
 
+#[cfg(feature = "runtime-benchmarks")]
+use snowbridge_inbound_queue_primitives::EventFixture;
+#[cfg(feature = "runtime-benchmarks")]
+use snowbridge_pallet_inbound_queue_fixtures::register_token::make_register_token_message;
+
 use crate::{self as inbound_queue};
 
 type Block = frame_system::mocking::MockBlock<Test>;
@@ -128,8 +133,9 @@ parameter_types! {
 
 #[cfg(feature = "runtime-benchmarks")]
 impl<T: snowbridge_pallet_ethereum_client::Config> BenchmarkHelper<T> for Test {
-	// not implemented since the MockVerifier is used for tests
-	fn initialize_storage(_: BeaconHeader, _: H256) {}
+	fn initialize_storage() -> EventFixture {
+		make_register_token_message()
+	}
 }
 
 // Mock XCM sender that always succeeds
@@ -179,7 +185,7 @@ impl StaticLookup for MockChannelLookup {
 		if channel_id !=
 			hex!("c173fac324158e77fb5840738a1a541f633cbec8884c6a601c567d2b376a0539").into()
 		{
-			return None
+			return None;
 		}
 		Some(Channel { agent_id: H256::zero(), para_id: ASSET_HUB_PARAID.into() })
 	}
@@ -195,16 +201,24 @@ impl TransactAsset for SuccessfulTransactor {
 		Ok(())
 	}
 
-	fn deposit_asset(_what: &Asset, _who: &Location, _context: Option<&XcmContext>) -> XcmResult {
+	fn deposit_asset(
+		_what: AssetsInHolding,
+		_who: &Location,
+		_context: Option<&XcmContext>,
+	) -> Result<(), (AssetsInHolding, XcmError)> {
 		Ok(())
 	}
 
 	fn withdraw_asset(
-		_what: &Asset,
+		what: &Asset,
 		_who: &Location,
 		_context: Option<&XcmContext>,
 	) -> Result<AssetsInHolding, XcmError> {
-		Ok(AssetsInHolding::default())
+		Ok(xcm_executor::test_helpers::mock_asset_to_holding(what.clone()))
+	}
+
+	fn mint_asset(what: &Asset, _context: &XcmContext) -> Result<AssetsInHolding, XcmError> {
+		Ok(xcm_executor::test_helpers::mock_asset_to_holding(what.clone()))
 	}
 
 	fn internal_transfer_asset(
@@ -212,8 +226,8 @@ impl TransactAsset for SuccessfulTransactor {
 		_from: &Location,
 		_to: &Location,
 		_context: &XcmContext,
-	) -> Result<AssetsInHolding, XcmError> {
-		Ok(AssetsInHolding::default())
+	) -> Result<Asset, XcmError> {
+		Ok(_what.clone())
 	}
 }
 
@@ -289,6 +303,7 @@ pub fn mock_event_log() -> Log {
         ],
         // Nonce + Payload
         data: hex!("00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000002e000f000000000000000087d1f7fdfee7f651fabc8bfcb6e086c278b77a7d00e40b54020000000000000000000000000000000000000000000000000000000000").into(),
+        tx_index: 0,
     }
 }
 
@@ -302,6 +317,7 @@ pub fn mock_event_log_invalid_channel() -> Log {
             hex!("5f7060e971b0dc81e63f0aa41831091847d97c1a4693ac450cc128c7214e65e0").into(),
         ],
         data: hex!("00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000001e000f000000000000000087d1f7fdfee7f651fabc8bfcb6e086c278b77a7d0000").into(),
+        tx_index: 0,
     }
 }
 
@@ -318,6 +334,7 @@ pub fn mock_event_log_invalid_gateway() -> Log {
         ],
         // Nonce + Payload
         data: hex!("00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000001e000f000000000000000087d1f7fdfee7f651fabc8bfcb6e086c278b77a7d0000").into(),
+        tx_index: 0,
     }
 }
 

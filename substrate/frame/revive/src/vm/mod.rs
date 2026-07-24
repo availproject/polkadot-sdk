@@ -25,25 +25,19 @@ mod runtime_costs;
 pub use runtime_costs::RuntimeCosts;
 
 use crate::{
+	AccountIdOf, BalanceOf, CodeInfoOf, CodeRemoved, Config, Error, ExecConfig, ExecError,
+	HoldReason, LOG_TARGET, Pallet, PristineCode, StorageDeposit, Weight, deposit_payment,
 	exec::{ExecResult, Executable, ExportedFunction, Ext},
-	frame_support::{ensure, error::BadOrigin, traits::tokens::Restriction},
-	gas::{GasMeter, Token},
-	storage::meter::Diff,
+	frame_support::ensure,
+	metering::{ResourceMeter, State, Token},
 	weights::WeightInfo,
-	AccountIdOf, BalanceOf, CodeInfoOf, CodeRemoved, Config, Error, HoldReason, PristineCode,
-	Weight, LOG_TARGET,
 };
 use alloc::vec::Vec;
 use codec::{Decode, Encode, MaxEncodedLen};
-use frame_support::{
-	dispatch::DispatchResult,
-	traits::{
-		fungible::MutateHold,
-		tokens::{Fortitude, Precision, Preservation},
-	},
-};
-use sp_core::{Get, H256, U256};
-use sp_runtime::DispatchError;
+use frame_support::dispatch::DispatchResult;
+use pallet_revive_uapi::ReturnErrorCode;
+use sp_core::{Get, H256};
+use sp_runtime::{DispatchError, Saturating, traits::BadOrigin};
 
 /// Validated Vm module ready for execution.
 /// This data structure is immutable once created and stored.
@@ -108,9 +102,9 @@ pub struct CodeInfo<T: Config> {
 /// Calculate the deposit required for storing code and its metadata.
 pub fn calculate_code_deposit<T: Config>(code_len: u32) -> BalanceOf<T> {
 	let bytes_added = code_len.saturating_add(<CodeInfo<T>>::max_encoded_len() as u32);
-	Diff { bytes_added, items_added: 2, ..Default::default() }
-		.update_contract::<T>(None)
-		.charge_or_zero()
+	T::DepositPerByte::get()
+		.saturating_mul(bytes_added.into())
+		.saturating_add(T::DepositPerItem::get().saturating_mul(2u32.into()))
 }
 
 impl ExportedFunction {
@@ -161,10 +155,7 @@ pub fn code_load_weight(code_len: u32) -> Weight {
 	Token::<crate::tests::Test>::weight(&CodeLoadToken { code_len, code_type: BytecodeType::Pvm })
 }
 
-impl<T: Config> ContractBlob<T>
-where
-	BalanceOf<T>: Into<U256> + TryFrom<U256>,
-{
+impl<T: Config> ContractBlob<T> {
 	/// Remove the code from storage and refund the deposit to its owner.
 	///
 	/// Applies all necessary checks before removing the code.
@@ -173,16 +164,12 @@ where
 			if let Some(code_info) = existing {
 				ensure!(code_info.refcount == 0, <Error<T>>::CodeInUse);
 				ensure!(&code_info.owner == origin, BadOrigin);
-				T::Currency::transfer_on_hold(
-					&HoldReason::CodeUploadDepositReserve.into(),
-					&crate::Pallet::<T>::account_id(),
-					&code_info.owner,
+				<Pallet<T>>::refund_deposit(
+					HoldReason::CodeUploadDepositReserve,
+					&Pallet::<T>::account_id(),
+					deposit_payment::Funds::Balance(&code_info.owner),
 					code_info.deposit,
-					Precision::Exact,
-					Restriction::Free,
-					Fortitude::Polite,
 				)?;
-
 				*existing = None;
 				<PristineCode<T>>::remove(&code_hash);
 				Ok(())
@@ -193,7 +180,11 @@ where
 	}
 
 	/// Puts the module blob into storage, and returns the deposit collected for the storage.
-	pub fn store_code(&mut self, skip_transfer: bool) -> Result<BalanceOf<T>, Error<T>> {
+	pub fn store_code<S: State>(
+		&mut self,
+		exec_config: &ExecConfig<T>,
+		meter: &mut ResourceMeter<T, S>,
+	) -> Result<BalanceOf<T>, DispatchError> {
 		let code_hash = *self.code_hash();
 		ensure!(code_hash != H256::zero(), <Error<T>>::CodeNotFound);
 
@@ -208,21 +199,18 @@ where
 				None => {
 					let deposit = self.code_info.deposit;
 
-					if !skip_transfer {
-						T::Currency::transfer_and_hold(
-							&HoldReason::CodeUploadDepositReserve.into(),
+					<Pallet<T>>::charge_deposit(
+							HoldReason::CodeUploadDepositReserve,
 							&self.code_info.owner,
-							&crate::Pallet::<T>::account_id(),
+							&Pallet::<T>::account_id(),
 							deposit,
-							Precision::Exact,
-							Preservation::Preserve,
-							Fortitude::Polite,
+							exec_config,
 						)
-					 .map_err(|err| {
+					 .inspect_err(|err| {
 							log::debug!(target: LOG_TARGET, "failed to hold store code deposit {deposit:?} for owner: {:?}: {err:?}", self.code_info.owner);
-							<Error<T>>::StorageDepositNotEnoughFunds
 					})?;
-					}
+
+					meter.charge_deposit(&StorageDeposit::Charge(deposit))?;
 
 					<PristineCode<T>>::insert(code_hash, &self.code.to_vec());
 					*stored_code_info = Some(self.code_info.clone());
@@ -246,6 +234,18 @@ impl<T: Config> CodeInfo<T> {
 		}
 	}
 
+	#[cfg(any(feature = "runtime-benchmarks", test))]
+	pub fn new_with_deposit(owner: T::AccountId, deposit: BalanceOf<T>) -> Self {
+		CodeInfo {
+			owner,
+			deposit,
+			refcount: 0,
+			code_len: 0,
+			code_type: BytecodeType::Pvm,
+			behaviour_version: Default::default(),
+		}
+	}
+
 	/// Returns reference count of the module.
 	#[cfg(test)]
 	pub fn refcount(&self) -> u64 {
@@ -255,6 +255,11 @@ impl<T: Config> CodeInfo<T> {
 	/// Returns the deposit of the module.
 	pub fn deposit(&self) -> BalanceOf<T> {
 		self.deposit
+	}
+
+	/// Returns the account that uploaded the module.
+	pub fn owner(&self) -> &AccountIdOf<T> {
+		&self.owner
 	}
 
 	/// Returns the code length.
@@ -295,14 +300,11 @@ impl<T: Config> CodeInfo<T> {
 			let Some(code_info) = existing else { return Err(Error::<T>::CodeNotFound.into()) };
 
 			if code_info.refcount == 1 {
-				T::Currency::transfer_on_hold(
-					&HoldReason::CodeUploadDepositReserve.into(),
-					&crate::Pallet::<T>::account_id(),
-					&code_info.owner,
+				<Pallet<T>>::refund_deposit(
+					HoldReason::CodeUploadDepositReserve,
+					&Pallet::<T>::account_id(),
+					deposit_payment::Funds::Balance(&code_info.owner),
 					code_info.deposit,
-					Precision::Exact,
-					Restriction::Free,
-					Fortitude::Polite,
 				)?;
 
 				*existing = None;
@@ -320,15 +322,19 @@ impl<T: Config> CodeInfo<T> {
 	}
 }
 
-impl<T: Config> Executable<T> for ContractBlob<T>
-where
-	BalanceOf<T>: Into<U256> + TryFrom<U256>,
-{
-	fn from_storage(code_hash: H256, gas_meter: &mut GasMeter<T>) -> Result<Self, DispatchError> {
+impl<T: Config> Executable<T> for ContractBlob<T> {
+	fn from_storage<S: State>(
+		code_hash: H256,
+		meter: &mut ResourceMeter<T, S>,
+	) -> Result<Self, DispatchError> {
 		let code_info = <CodeInfoOf<T>>::get(code_hash).ok_or(Error::<T>::CodeNotFound)?;
-		gas_meter.charge(CodeLoadToken::from_code_info(&code_info))?;
+		meter.charge_weight_token(CodeLoadToken::from_code_info(&code_info))?;
 		let code = <PristineCode<T>>::get(&code_hash).ok_or(Error::<T>::CodeNotFound)?;
 		Ok(Self { code, code_info, code_hash })
+	}
+
+	fn from_evm_init_code(code: Vec<u8>, owner: AccountIdOf<T>) -> Result<Self, DispatchError> {
+		ContractBlob::from_evm_init_code(code, owner)
 	}
 
 	fn execute<E: Ext<T = T>>(
@@ -342,11 +348,9 @@ where
 				self.prepare_call(pvm::Runtime::new(ext, input_data), function, 0)?;
 			prepared_call.call()
 		} else if T::AllowEVMBytecode::get() {
-			use crate::vm::evm::EVMInputs;
 			use revm::bytecode::Bytecode;
-			let inputs = EVMInputs::new(input_data);
 			let bytecode = Bytecode::new_raw(self.code.into());
-			evm::call(bytecode, ext, inputs)
+			evm::call(bytecode, ext, input_data)
 		} else {
 			Err(Error::<T>::CodeRejected.into())
 		}
@@ -362,5 +366,32 @@ where
 
 	fn code_info(&self) -> &CodeInfo<T> {
 		&self.code_info
+	}
+}
+
+/// Fallible conversion of a `ExecError` to `ReturnErrorCode`.
+///
+/// This is used when converting the error returned from a subcall in order to decide
+/// whether to trap the caller or allow handling of the error.
+pub(crate) fn exec_error_into_return_code<E: Ext>(
+	from: ExecError,
+) -> Result<ReturnErrorCode, DispatchError> {
+	use crate::exec::ErrorOrigin::Callee;
+	use ReturnErrorCode::*;
+
+	let transfer_failed = Error::<E::T>::TransferFailed.into();
+	let out_of_gas = Error::<E::T>::OutOfGas.into();
+	let out_of_deposit = Error::<E::T>::StorageDepositLimitExhausted.into();
+	let duplicate_contract = Error::<E::T>::DuplicateContract.into();
+	let unsupported_precompile = Error::<E::T>::UnsupportedPrecompileAddress.into();
+
+	// errors in the callee do not trap the caller
+	match (from.error, from.origin) {
+		(err, _) if err == transfer_failed => Ok(TransferFailed),
+		(err, _) if err == duplicate_contract => Ok(DuplicateContractAddress),
+		(err, _) if err == unsupported_precompile => Err(err),
+		(err, Callee) if err == out_of_gas || err == out_of_deposit => Ok(OutOfResources),
+		(_, Callee) => Ok(CalleeTrapped),
+		(err, _) => Err(err),
 	}
 }

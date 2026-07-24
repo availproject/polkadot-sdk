@@ -29,7 +29,7 @@ use sp_runtime::{
 	traits::{
 		Dispatchable, ExtensionPostDispatchWeightHandler, RefundWeight, TransactionExtension,
 	},
-	DispatchError, RuntimeDebug,
+	DispatchError,
 };
 use sp_weights::Weight;
 
@@ -154,11 +154,23 @@ pub trait CustomDispatchFee<T> {
 }
 
 /// Defines how the fees are getting modified.
-#[derive(Clone, Copy, Eq, PartialEq, Default, RuntimeDebug, Encode, Decode, DecodeWithMemTracking, TypeInfo, MaxEncodedLen)]
+#[derive(
+	Clone,
+	Copy,
+	Eq,
+	PartialEq,
+	Default,
+	Debug,
+	Encode,
+	Decode,
+	DecodeWithMemTracking,
+	TypeInfo,
+	MaxEncodedLen,
+)]
 pub struct DispatchFeeModifier {
 	pub weight_maximum_fee: Option<u128>,
 	pub weight_fee_divider: Option<u32>,
-	pub weight_fee_multiplier: Option<u32>
+	pub weight_fee_multiplier: Option<u32>,
 }
 
 /// Explicit enum to denote if a transaction pays fee or not.
@@ -422,10 +434,13 @@ where
 }
 
 /// Implementation for unchecked extrinsic.
-impl<Address, Call: Dispatchable, Signature, Extension: TransactionExtension<Call>> GetDispatchInfo
-	for UncheckedExtrinsic<Address, Call, Signature, Extension>
+impl<Address, Call, Signature, ExtensionV0, ExtensionOtherVersions> GetDispatchInfo
+	for UncheckedExtrinsic<Address, Call, Signature, ExtensionV0, ExtensionOtherVersions>
 where
-	Call: GetDispatchInfo + Dispatchable,
+	Call: GetDispatchInfo + Dispatchable + Encode,
+	ExtensionV0: TransactionExtension<Call>,
+	ExtensionOtherVersions: sp_runtime::traits::Pipeline<Call>,
+	<Call as Dispatchable>::RuntimeOrigin: sp_runtime::traits::AsTransactionAuthorizedOrigin,
 {
 	fn get_dispatch_info(&self) -> DispatchInfo {
 		let mut info = self.function.get_dispatch_info();
@@ -435,10 +450,13 @@ where
 }
 
 /// Implementation for checked extrinsic.
-impl<AccountId, Call: Dispatchable, Extension: TransactionExtension<Call>> GetDispatchInfo
-	for CheckedExtrinsic<AccountId, Call, Extension>
+impl<AccountId, Call, ExtensionV0, ExtensionOtherVersions> GetDispatchInfo
+	for CheckedExtrinsic<AccountId, Call, ExtensionV0, ExtensionOtherVersions>
 where
-	Call: GetDispatchInfo,
+	Call: GetDispatchInfo + Dispatchable + Encode,
+	ExtensionV0: TransactionExtension<Call>,
+	ExtensionOtherVersions: sp_runtime::traits::Pipeline<Call>,
+	<Call as Dispatchable>::RuntimeOrigin: sp_runtime::traits::AsTransactionAuthorizedOrigin,
 {
 	fn get_dispatch_info(&self) -> DispatchInfo {
 		self.function.get_dispatch_info()
@@ -553,7 +571,7 @@ pub trait WeighData<T> {
 
 impl<T> WeighData<T> for Weight {
 	fn weigh_data(&self, _: T) -> Weight {
-		return *self
+		return *self;
 	}
 }
 
@@ -565,19 +583,19 @@ impl<T> PaysFee<T> for (Weight, DispatchClass, Pays) {
 
 impl<T> WeighData<T> for (Weight, DispatchClass) {
 	fn weigh_data(&self, args: T) -> Weight {
-		return self.0.weigh_data(args)
+		return self.0.weigh_data(args);
 	}
 }
 
 impl<T> WeighData<T> for (Weight, DispatchClass, Pays) {
 	fn weigh_data(&self, args: T) -> Weight {
-		return self.0.weigh_data(args)
+		return self.0.weigh_data(args);
 	}
 }
 
 impl<T> WeighData<T> for (Weight, DispatchClass, DispatchFeeModifier) {
 	fn weigh_data(&self, args: T) -> Weight {
-		return self.0.weigh_data(args)
+		return self.0.weigh_data(args);
 	}
 }
 
@@ -607,7 +625,7 @@ impl<T> PaysFee<T> for (Weight, DispatchClass, DispatchFeeModifier) {
 
 impl<T> WeighData<T> for (Weight, Pays) {
 	fn weigh_data(&self, args: T) -> Weight {
-		return self.0.weigh_data(args)
+		return self.0.weigh_data(args);
 	}
 }
 
@@ -747,13 +765,13 @@ impl<T> PaysFee<T> for u64 {
 
 impl<T> WeighData<T> for u64 {
 	fn weigh_data(&self, _: T) -> Weight {
-		return Weight::from_parts(*self, 0)
+		return Weight::from_parts(*self, 0);
 	}
 }
 
 impl<T> WeighData<T> for (u64, DispatchClass, Pays) {
 	fn weigh_data(&self, args: T) -> Weight {
-		return self.0.weigh_data(args)
+		return self.0.weigh_data(args);
 	}
 }
 
@@ -771,7 +789,7 @@ impl<T> PaysFee<T> for (u64, DispatchClass, Pays) {
 
 impl<T> WeighData<T> for (u64, DispatchClass) {
 	fn weigh_data(&self, args: T) -> Weight {
-		return self.0.weigh_data(args)
+		return self.0.weigh_data(args);
 	}
 }
 
@@ -789,7 +807,7 @@ impl<T> PaysFee<T> for (u64, DispatchClass) {
 
 impl<T> WeighData<T> for (u64, Pays) {
 	fn weigh_data(&self, args: T) -> Weight {
-		return self.0.weigh_data(args)
+		return self.0.weigh_data(args);
 	}
 }
 
@@ -1665,7 +1683,7 @@ mod extension_weight_tests {
 			// First testcase
 			let ext: TxExtension = (HalfCostIf(false), FreeIfUnder(2000), ActualWeightIs(0));
 			let xt = CheckedExtrinsic {
-				format: ExtrinsicFormat::Signed(0, ext.clone()),
+				format: ExtrinsicFormat::<_, _>::Signed(0, ext.clone()),
 				function: call.clone(),
 			};
 			assert_eq!(xt.extension_weight(), Weight::from_parts(600, 0));
@@ -1680,7 +1698,7 @@ mod extension_weight_tests {
 			// Second testcase
 			let ext: TxExtension = (HalfCostIf(false), FreeIfUnder(1100), ActualWeightIs(200));
 			let xt = CheckedExtrinsic {
-				format: ExtrinsicFormat::Signed(0, ext),
+				format: ExtrinsicFormat::<_, _>::Signed(0, ext),
 				function: call.clone(),
 			};
 			let post_info = xt.apply::<ExtRuntime>(&info, 0).unwrap().unwrap();
@@ -1690,7 +1708,7 @@ mod extension_weight_tests {
 			// Third testcase
 			let ext: TxExtension = (HalfCostIf(true), FreeIfUnder(1060), ActualWeightIs(200));
 			let xt = CheckedExtrinsic {
-				format: ExtrinsicFormat::Signed(0, ext),
+				format: ExtrinsicFormat::<_, _>::Signed(0, ext),
 				function: call.clone(),
 			};
 			let post_info = xt.apply::<ExtRuntime>(&info, 0).unwrap().unwrap();
@@ -1700,7 +1718,7 @@ mod extension_weight_tests {
 			// Fourth testcase
 			let ext: TxExtension = (HalfCostIf(false), FreeIfUnder(100), ActualWeightIs(300));
 			let xt = CheckedExtrinsic {
-				format: ExtrinsicFormat::Signed(0, ext),
+				format: ExtrinsicFormat::<_, _>::Signed(0, ext),
 				function: call.clone(),
 			};
 			let post_info = xt.apply::<ExtRuntime>(&info, 0).unwrap().unwrap();

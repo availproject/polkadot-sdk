@@ -33,6 +33,8 @@ pub(crate) type DefaultLogger = stderr_writer::MakeStderrWriter;
 pub use directives::*;
 pub use sc_tracing_proc_macro::*;
 
+pub use internal_utils::{self, OtelGuards};
+use internal_utils::{build_otel_layers, OtelParams};
 use is_terminal::IsTerminal;
 use std::io;
 use tracing::Subscriber;
@@ -46,9 +48,6 @@ use tracing_subscriber::{
 	registry::LookupSpan,
 	EnvFilter, FmtSubscriber, Layer, Registry,
 };
-use internal_utils::{build_otel_layers, OtelParams};
-pub use internal_utils::{OtelGuards};
-pub use internal_utils;
 
 pub use event_format::*;
 pub use fast_local_time::FastLocalTime;
@@ -73,11 +72,12 @@ pub enum Error {
 }
 
 #[derive(Debug)]
+/// Error returned while configuring OpenTelemetry.
 pub struct OtelError(pub String);
 impl crate::fmt::Display for OtelError {
-    fn fmt(&self, fmt: &mut crate::fmt::Formatter) -> crate::fmt::Result {
-        fmt.write_str(&self.0)
-    }
+	fn fmt(&self, fmt: &mut crate::fmt::Formatter) -> crate::fmt::Result {
+		fmt.write_str(&self.0)
+	}
 }
 impl std::error::Error for OtelError {}
 
@@ -187,7 +187,10 @@ where
 	let max_level_hint = Layer::<FmtSubscriber>::max_level_hint(&env_filter);
 	let max_level = to_log_level_filter(max_level_hint);
 
-	tracing_log::LogTracer::builder().with_max_level(max_level).init()?;
+	tracing_log::LogTracer::builder()
+		.with_interest_cache(tracing_log::InterestCacheConfig::default())
+		.with_max_level(max_level)
+		.init()?;
 
 	// If we're only logging `INFO` entries then we'll use a simplified logging format.
 	let detailed_output = match max_level_hint {
@@ -235,6 +238,16 @@ pub struct LoggerBuilder {
 impl LoggerBuilder {
 	/// Create a new [`LoggerBuilder`] which can be used to initialize the global logger.
 	pub fn new<S: Into<String>>(directives: S) -> Self {
+		let otel = OtelParams {
+            endpoint_traces: Default::default(),
+            endpoint_metrics: Default::default(),
+            endpoint_logs: Default::default(),
+            service_name: Default::default(),
+            service_version: Default::default(),
+            resource_attributes: Vec::new(),
+            metric_temporality: internal_utils::Temporality::Delta,
+        };
+
 		Self {
 			directives: directives.into(),
 			profiling: None,
@@ -242,7 +255,7 @@ impl LoggerBuilder {
 			log_reloading: false,
 			force_colors: None,
 			detailed_output: false,
-			otel: OtelParams::default(),
+			otel,
 		}
 	}
 
@@ -257,10 +270,7 @@ impl LoggerBuilder {
 	}
 
 	/// Add custom otel.
-	pub fn with_otel(
-		&mut self,
-		value: OtelParams,
-	) -> &mut Self {
+	pub fn with_otel(&mut self, value: OtelParams) -> &mut Self {
 		self.otel = value;
 		self
 	}
@@ -317,8 +327,8 @@ impl LoggerBuilder {
 					.into_iter()
 					.for_each(|profiler| profiling.add_handler(profiler));
 
-				
-				let (guards, otel_layers) = build_otel_layers(self.otel).map_err(|e| OtelError(e.to_string()))?;
+				let (guards, otel_layers) =
+					build_otel_layers(self.otel).map_err(|e| OtelError(e.to_string()))?;
 				let mut layers = otel_layers;
 				layers.push(Box::new(profiling));
 
@@ -339,8 +349,8 @@ impl LoggerBuilder {
 					.into_iter()
 					.for_each(|profiler| profiling.add_handler(profiler));
 
-
-				let (guards, otel_layers) = build_otel_layers(self.otel).map_err(|e| OtelError(e.to_string()))?;
+				let (guards, otel_layers) =
+					build_otel_layers(self.otel).map_err(|e| OtelError(e.to_string()))?;
 				let mut layers = otel_layers;
 				layers.push(Box::new(profiling));
 
@@ -356,7 +366,8 @@ impl LoggerBuilder {
 				|builder| enable_log_reloading!(builder),
 			)?;
 
-			let (guards, otel_layers) = build_otel_layers(self.otel).map_err(|e| OtelError(e.to_string()))?;
+			let (guards, otel_layers) =
+				build_otel_layers(self.otel).map_err(|e| OtelError(e.to_string()))?;
 			let layers = otel_layers;
 
 			tracing::subscriber::set_global_default(subscriber.with(layers))?;
@@ -370,7 +381,8 @@ impl LoggerBuilder {
 				|builder| builder,
 			)?;
 
-			let (guards, otel_layers) = build_otel_layers(self.otel).map_err(|e| OtelError(e.to_string()))?;
+			let (guards, otel_layers) =
+				build_otel_layers(self.otel).map_err(|e| OtelError(e.to_string()))?;
 			let layers = otel_layers;
 
 			tracing::subscriber::set_global_default(subscriber.with(layers))?;
